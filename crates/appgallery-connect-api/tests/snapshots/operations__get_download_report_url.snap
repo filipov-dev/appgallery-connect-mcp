@@ -1,0 +1,155 @@
+---
+source: crates/appgallery-connect-api/tests/operations.rs
+expression: "snapshot_view(op(\"get_download_report_url\"))"
+---
+{
+  "access": "read",
+  "body": null,
+  "description": "The period between startTime and endTime (YYYYMMDD, UTC) is up to 180 days. Data can be filtered and grouped by date, country or region, business type and app version. The link is temporary: download the file right away.",
+  "group": "reports",
+  "input_schema": {
+    "additionalProperties": false,
+    "properties": {
+      "appId": {
+        "description": "App ID.",
+        "type": "string"
+      },
+      "endTime": {
+        "description": "Query end time in UTC time. The format is YYYYMMDD. The interval between startTime and endTime cannot exceed 180 days.",
+        "type": "string"
+      },
+      "exportType": {
+        "description": "Exported file type. Options: CSV EXCEL The default value is CSV.",
+        "type": "string"
+      },
+      "filterCondition": {
+        "description": "Filters to apply; repeat the parameter for each filter: countryId, businessType, appVersion. Each filter needs a filterConditionValue in the same position.",
+        "items": {
+          "type": "string"
+        },
+        "type": "array"
+      },
+      "filterConditionValue": {
+        "description": "Values of the filters, in the same order as filterCondition. countryId: country or region codes (all for global data, others for the group of US, CU, IR, SD and SY). businessType: ALL, AppGallery or AppTouch (case sensitive). appVersion: versions separated by commas, or all.",
+        "items": {
+          "type": "string"
+        },
+        "type": "array"
+      },
+      "groupBy": {
+        "description": "Statistics dimension. Options: date: by date. countryId: by country/region. businessType: by business type. appVersion: by app version. The default value is date.",
+        "type": "string"
+      },
+      "language": {
+        "description": "Query language. The report title can be displayed in different languages. Only Simplified Chinese (zh-CN), English (en-US), and Russian (ru-RU) are supported.",
+        "type": "string"
+      },
+      "startTime": {
+        "description": "Query start time in UTC time. The format is YYYYMMDD. The interval between startTime and endTime cannot exceed 180 days.",
+        "type": "string"
+      }
+    },
+    "required": [
+      "appId",
+      "language",
+      "startTime",
+      "endTime"
+    ],
+    "type": "object"
+  },
+  "method": "GET",
+  "operation_id": "reports.downloadInstall.export",
+  "params": [
+    {
+      "api_name": "appId",
+      "description": "App ID.",
+      "location": "Path",
+      "name": "appId",
+      "repeated": false,
+      "required": true,
+      "value_type": "String"
+    },
+    {
+      "api_name": "language",
+      "description": "Query language. The report title can be displayed in different languages. Only Simplified Chinese (zh-CN), English (en-US), and Russian (ru-RU) are supported.",
+      "location": "Query",
+      "name": "language",
+      "repeated": false,
+      "required": true,
+      "value_type": "String"
+    },
+    {
+      "api_name": "startTime",
+      "description": "Query start time in UTC time. The format is YYYYMMDD. The interval between startTime and endTime cannot exceed 180 days.",
+      "location": "Query",
+      "name": "startTime",
+      "repeated": false,
+      "required": true,
+      "value_type": "String"
+    },
+    {
+      "api_name": "endTime",
+      "description": "Query end time in UTC time. The format is YYYYMMDD. The interval between startTime and endTime cannot exceed 180 days.",
+      "location": "Query",
+      "name": "endTime",
+      "repeated": false,
+      "required": true,
+      "value_type": "String"
+    },
+    {
+      "api_name": "filterCondition",
+      "description": "Filters to apply; repeat the parameter for each filter: countryId, businessType, appVersion. Each filter needs a filterConditionValue in the same position.",
+      "location": "Query",
+      "name": "filterCondition",
+      "repeated": true,
+      "required": false,
+      "value_type": "Array"
+    },
+    {
+      "api_name": "filterConditionValue",
+      "description": "Values of the filters, in the same order as filterCondition. countryId: country or region codes (all for global data, others for the group of US, CU, IR, SD and SY). businessType: ALL, AppGallery or AppTouch (case sensitive). appVersion: versions separated by commas, or all.",
+      "location": "Query",
+      "name": "filterConditionValue",
+      "repeated": true,
+      "required": false,
+      "value_type": "Array"
+    },
+    {
+      "api_name": "groupBy",
+      "description": "Statistics dimension. Options: date: by date. countryId: by country/region. businessType: by business type. appVersion: by app version. The default value is date.",
+      "location": "Query",
+      "name": "groupBy",
+      "repeated": false,
+      "required": false,
+      "value_type": "String"
+    },
+    {
+      "api_name": "exportType",
+      "description": "Exported file type. Options: CSV EXCEL The default value is CSV.",
+      "location": "Query",
+      "name": "exportType",
+      "repeated": false,
+      "required": false,
+      "value_type": "String"
+    }
+  ],
+  "path": "/api/report/distribution-operation-quality/v1/appDownloadExport/{appId}",
+  "reference": "https://developer.huawei.com/consumer/en/doc/development/AppGallery-connect-References/agcapi-appdownloadexport-0000001158365059",
+  "response": "Json",
+  "result": {
+    "code_field": "code",
+    "field": "ret",
+    "message_field": "msg"
+  },
+  "secrets": [
+    {
+      "description": "a temporary link to the report file",
+      "hint": "The link is valid only for a short time: pass save_to in the same call.",
+      "kind": "DownloadUrl",
+      "path": "fileURL"
+    }
+  ],
+  "summary": "Returns a temporary link to the download and installation report of the app (CSV or Excel).",
+  "tool_name": "get_download_report_url",
+  "toolset": "reports"
+}

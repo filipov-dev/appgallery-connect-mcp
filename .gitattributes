@@ -1,0 +1,5 @@
+# Переводы строк при клонировании — LF везде, в том числе на Windows: тесты генератора
+# правят текст `spec/overlay.toml` построчно, а снимки insta сравниваются побайтно.
+* text=auto eol=lf
+# Скрипты Windows PowerShell 5.1 — с CRLF, как в рабочей копии Windows.
+*.ps1 text eol=crlf

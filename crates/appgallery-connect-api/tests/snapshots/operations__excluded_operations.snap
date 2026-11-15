@@ -1,0 +1,71 @@
+---
+source: crates/appgallery-connect-api/tests/operations.rs
+expression: excluded
+---
+[
+  {
+    "access": "write",
+    "alternative": "No call is needed: the server authorizes every request with the API client of its profile.",
+    "callable": false,
+    "group": "auth",
+    "method": "POST",
+    "note": "Issues credentials. The server gets and refreshes the access token itself and never returns it.",
+    "operation_id": "auth.token.create",
+    "path": "/api/oauth2/v1/token",
+    "reason": "overlay",
+    "summary": "Issues an access token for an API client.",
+    "toolset": ""
+  },
+  {
+    "access": "write",
+    "alternative": "For an app package (APK, AAB, RPK, APP, EXE) use package_upload: it uploads the file, in chunks when it is large, and attaches it to the app itself. For the icon, screenshots and videos of the app page use image_sync.",
+    "callable": false,
+    "group": "upload",
+    "method": "POST",
+    "note": "Steps of a file upload; their responses consist of one-time upload URLs and authorization headers, which the server does not return, so they are not called through api_request either.",
+    "operation_id": "upload.multipart.compose",
+    "path": "/api/publish/v2/upload/multipart/compose",
+    "reason": "overlay",
+    "summary": "Merges the uploaded chunks into one file.",
+    "toolset": "releases"
+  },
+  {
+    "access": "write",
+    "alternative": "For an app package (APK, AAB, RPK, APP, EXE) use package_upload: it uploads the file, in chunks when it is large, and attaches it to the app itself. For the icon, screenshots and videos of the app page use image_sync.",
+    "callable": false,
+    "group": "upload",
+    "method": "POST",
+    "note": "Steps of a file upload; their responses consist of one-time upload URLs and authorization headers, which the server does not return, so they are not called through api_request either.",
+    "operation_id": "upload.multipart.init",
+    "path": "/api/publish/v2/upload/multipart/init",
+    "reason": "overlay",
+    "summary": "Starts a chunked upload of a large file.",
+    "toolset": "releases"
+  },
+  {
+    "access": "write",
+    "alternative": "For an app package (APK, AAB, RPK, APP, EXE) use package_upload: it uploads the file, in chunks when it is large, and attaches it to the app itself. For the icon, screenshots and videos of the app page use image_sync.",
+    "callable": false,
+    "group": "upload",
+    "method": "POST",
+    "note": "Steps of a file upload; their responses consist of one-time upload URLs and authorization headers, which the server does not return, so they are not called through api_request either.",
+    "operation_id": "upload.multipart.parts",
+    "path": "/api/publish/v2/upload/multipart/parts",
+    "reason": "overlay",
+    "summary": "Returns upload URLs for the chunks of a chunked upload.",
+    "toolset": "releases"
+  },
+  {
+    "access": "write",
+    "alternative": "For an app package (APK, AAB, RPK, APP, EXE) use package_upload: it uploads the file, in chunks when it is large, and attaches it to the app itself. For the icon, screenshots and videos of the app page use image_sync.",
+    "callable": false,
+    "group": "upload",
+    "method": "GET",
+    "note": "Steps of a file upload; their responses consist of one-time upload URLs and authorization headers, which the server does not return, so they are not called through api_request either.",
+    "operation_id": "upload.uploadUrl.get",
+    "path": "/api/publish/v2/upload-url/for-obs",
+    "reason": "overlay",
+    "summary": "Returns a one-time URL and request headers for uploading a file to the Huawei file storage.",
+    "toolset": "releases"
+  }
+]

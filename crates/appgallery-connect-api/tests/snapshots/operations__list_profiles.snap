@@ -1,0 +1,95 @@
+---
+source: crates/appgallery-connect-api/tests/operations.rs
+expression: "snapshot_view(op(\"list_profiles\"))"
+---
+{
+  "access": "read",
+  "body": null,
+  "description": "The app ID is passed in the appId header; the provisionId header narrows the result to one profile. Paged with fromRecCount and maxReqCount (up to 100).",
+  "group": "provisioning",
+  "input_schema": {
+    "additionalProperties": false,
+    "properties": {
+      "appId": {
+        "description": "App ID.",
+        "maxLength": 32,
+        "type": "string"
+      },
+      "fromRecCount": {
+        "description": "Start page number. Default value: 1",
+        "type": "integer"
+      },
+      "maxReqCount": {
+        "description": "Number of records returned on each page. Value range: 1 to 100 Default value: 10",
+        "type": "integer"
+      },
+      "provisionId": {
+        "description": "Profile ID.",
+        "type": "string"
+      }
+    },
+    "required": [
+      "appId"
+    ],
+    "type": "object"
+  },
+  "method": "GET",
+  "operation_id": "provisioning.profile.list",
+  "params": [
+    {
+      "api_name": "fromRecCount",
+      "description": "Start page number. Default value: 1",
+      "location": "Query",
+      "name": "fromRecCount",
+      "repeated": false,
+      "required": false,
+      "value_type": "Integer"
+    },
+    {
+      "api_name": "maxReqCount",
+      "description": "Number of records returned on each page. Value range: 1 to 100 Default value: 10",
+      "location": "Query",
+      "name": "maxReqCount",
+      "repeated": false,
+      "required": false,
+      "value_type": "Integer"
+    },
+    {
+      "api_name": "appId",
+      "description": "App ID.",
+      "location": "Header",
+      "name": "appId",
+      "repeated": false,
+      "required": true,
+      "value_type": "String"
+    },
+    {
+      "api_name": "provisionId",
+      "description": "Profile ID.",
+      "location": "Header",
+      "name": "provisionId",
+      "repeated": false,
+      "required": false,
+      "value_type": "String"
+    }
+  ],
+  "path": "/api/publish/v3/provision/list",
+  "reference": "https://developer.huawei.com/consumer/en/doc/app/agc-help-provision-api-query-provision-0000002236041506",
+  "response": "Json",
+  "result": {
+    "code_field": "code",
+    "field": "ret",
+    "message_field": "msg"
+  },
+  "secrets": [
+    {
+      "description": "a temporary link to the provisioning profile file",
+      "hint": "save_to saves one file: narrow the list to one profile with provisionId.",
+      "kind": "DownloadUrl",
+      "path": "provisionList[].provisionDownloadUrl"
+    }
+  ],
+  "summary": "Lists the provisioning profiles of an app.",
+  "tool_name": "list_profiles",
+  "toolset": "provisioning"
+}

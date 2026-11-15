@@ -1,0 +1,1103 @@
+{
+  "version": 1,
+  "language": "en",
+  "sources": [
+    {
+      "catalog": "AppGallery-connect-References",
+      "anchor": "agcapi-app-submit-0000001158245061",
+      "root": "Connect API"
+    },
+    {
+      "catalog": "app",
+      "anchor": "agc-help-connect-api-introduction-0000002270974725",
+      "root": "AppGallery Connect API"
+    }
+  ],
+  "pages": [
+    {
+      "id": "agcapi-obtain_token-0000001158365043",
+      "title": "Obtaining a Token",
+      "group": "auth",
+      "catalog": "AppGallery-connect-References",
+      "sha256": "e4cdefe457116a5e1342cd109f5422fdcc7577ac3a491ce67d1d55c8bb68e395"
+    },
+    {
+      "id": "agcapi-obtain-token-project-0000001477336048",
+      "title": "Obtaining a Project-Level Token",
+      "group": "auth",
+      "catalog": "AppGallery-connect-References",
+      "sha256": "665a535e08b68db986a62a1805611415dd467dea944d25ade0365141a847a8f8"
+    },
+    {
+      "id": "agcapi-publishing-api-0000002351880118",
+      "title": "Publishing API",
+      "group": "publishing",
+      "catalog": "AppGallery-connect-References",
+      "sha256": "57a7e727e0b7cc218faf85dd865c5fab2dcec386fdd065c3b923e782a04115ca"
+    },
+    {
+      "id": "agcapi-publishingapi-0000001150409957",
+      "title": "Android",
+      "group": "publishing",
+      "catalog": "AppGallery-connect-References",
+      "sha256": "84819ceda2ad45b50364183aeb6bf6fce063cf650bee0e3d6ca2fa96bf40d8fe"
+    },
+    {
+      "id": "agcapi-appid-list-0000001111845086",
+      "title": "Querying the App ID Corresponding to an App Package Name",
+      "group": "publishing",
+      "catalog": "AppGallery-connect-References",
+      "sha256": "4af014ecf5e04964196727a05214f0abc9eaa43035ebd48b99411c5d48fb3f6d"
+    },
+    {
+      "id": "agcapi-app-info-query-0000001158365045",
+      "title": "Querying App Information",
+      "group": "publishing",
+      "catalog": "AppGallery-connect-References",
+      "sha256": "9978285d058d9a5e25bfd852b12a4ac3aa183ad4df3cf198bcf4c5e57fff5adc"
+    },
+    {
+      "id": "agcapi-app-info-update-0000001111685198",
+      "title": "Updating App Basic Information",
+      "group": "publishing",
+      "catalog": "AppGallery-connect-References",
+      "sha256": "6d4fe6b0c020c9e15d187117d4889582862cd04de2c8e9f6ce8ea9de8d326126"
+    },
+    {
+      "id": "agcapi-language-info-update-0000001158245057",
+      "title": "Updating App Localization Information",
+      "group": "publishing",
+      "catalog": "AppGallery-connect-References",
+      "sha256": "35b3eebb7ac95c0ae3028850eb231073dc3f7f87a7a687aa64a3be2397409f8e"
+    },
+    {
+      "id": "agcapi-language-info-delete-0000001111845088",
+      "title": "Deleting App Localization Information",
+      "group": "publishing",
+      "catalog": "AppGallery-connect-References",
+      "sha256": "edcd93b620c87251095799d31556c3cf6436ab5dd1b188bf62e404572b697e8f"
+    },
+    {
+      "id": "agcapi-app-file-info-0000001111685202",
+      "title": "Updating App File Information",
+      "group": "publishing",
+      "catalog": "AppGallery-connect-References",
+      "sha256": "74a0ebf56342a67d7c1f0a16201703dac04d5c13a54cd37d36e2893ce62aaeef"
+    },
+    {
+      "id": "agcapi-app-submit-0000001158245061",
+      "title": "Submitting an App for Release",
+      "group": "publishing",
+      "catalog": "AppGallery-connect-References",
+      "sha256": "c44539b966de8851aa146f2abe9e0de58f396e042f174ccd8127c65ad04e9b62"
+    },
+    {
+      "id": "agcapi-app-submit-with-file-0000001111845092",
+      "title": "Submitting an App for Release in Download Mode",
+      "group": "publishing",
+      "catalog": "AppGallery-connect-References",
+      "sha256": "b1b82a6c87976796eb68908ca0ed010161138869eaea9f34567a5e325c3e5738"
+    },
+    {
+      "id": "agcapi-phased-release-0000001111685204",
+      "title": "Updating Phased Release",
+      "group": "publishing",
+      "catalog": "AppGallery-connect-References",
+      "sha256": "20fae68e95e962d118c0b60995a15826086a4070fb6752f107e4c25d5dd256c6"
+    },
+    {
+      "id": "agcapi-notify-release-0000001158245063",
+      "title": "Obtaining the Callback Result",
+      "group": "publishing",
+      "catalog": "AppGallery-connect-References",
+      "sha256": "da56d406ea9748fa1fdbd62d47467184a772232c63576e7612e7e3a0738387af"
+    },
+    {
+      "id": "agcapi-gms-0000001111845094",
+      "title": "Setting the GMS Dependency Flag for an App",
+      "group": "publishing",
+      "catalog": "AppGallery-connect-References",
+      "sha256": "da67daeb07b91a59b412c1fcd06050cad68fdcfc0927118661d8e43fc3302bae"
+    },
+    {
+      "id": "agcapi-update-releasetime-0000001158365053",
+      "title": "Updating the Release Time of a Version",
+      "group": "publishing",
+      "catalog": "AppGallery-connect-References",
+      "sha256": "a873db56eefb3b9c364c1d4f96eedc01c57e9c12214453ebcb9efdee53b267c5"
+    },
+    {
+      "id": "agcapi-query-aabfile-0000001111685206",
+      "title": "Querying the Compilation Status of an App Package",
+      "group": "publishing",
+      "catalog": "AppGallery-connect-References",
+      "sha256": "f8b07e9b40e8b6d0af2b50a0acc5208179bc54bdbc44e6624a7de73fe4cd351c"
+    },
+    {
+      "id": "agcapi-add-packageurl-0000001158245065",
+      "title": "Submitting an App Package in Download Mode",
+      "group": "publishing",
+      "catalog": "AppGallery-connect-References",
+      "sha256": "236800288bb7171a7cbb48c6a4efd8fa22a4008f9653293ceef57efbf437bb02"
+    },
+    {
+      "id": "agcapi-obbfile-package-list-0000001111685210",
+      "title": "Querying the App Package List",
+      "group": "publishing",
+      "catalog": "AppGallery-connect-References",
+      "sha256": "8929df88829746e530bbbfa3de54cf02bec4abf9a2e1a3056690ee642a5a9956"
+    },
+    {
+      "id": "agcapi-publishingapi-errorcode-0000001163523297",
+      "title": "Result Codes",
+      "group": "publishing",
+      "catalog": "AppGallery-connect-References",
+      "sha256": "b46131e1ff0f621c5f81565c4081a4975cf05141673f494d65e987f98190d118"
+    },
+    {
+      "id": "agcapi-uploadapi-0000002092927786",
+      "title": "Upload Management API",
+      "group": "upload",
+      "catalog": "AppGallery-connect-References",
+      "sha256": "097158401c52ea6b56e999881ee8e708f8251017053a2fe0625dc7c08df67088"
+    },
+    {
+      "id": "agcapi-upload-url-new-0000001111685200",
+      "title": "Obtaining the File Upload URL",
+      "group": "upload",
+      "catalog": "AppGallery-connect-References",
+      "sha256": "d309828355070a4b971f15966d5525fe1bdb9e97fd1029b5d431f079bc5e4d39"
+    },
+    {
+      "id": "agcapi-upload-file-new-0000001111845090",
+      "title": "Uploading a File",
+      "group": "upload",
+      "catalog": "AppGallery-connect-References",
+      "sha256": "7db13a86f69cace30d676eaf365f6729cd70a3107d83de6c8a3c7e746769c8fd"
+    },
+    {
+      "id": "agcapi-obbfile-init-0000001158365055",
+      "title": "Initializing Chunk Information",
+      "group": "upload",
+      "catalog": "AppGallery-connect-References",
+      "sha256": "f1faaa4062fe91f401864ad362f2f08fc7025e4aa83bd687da928d212d043c6c"
+    },
+    {
+      "id": "agcapi-obbfile-uploadurl-0000001111685208",
+      "title": "Obtaining Chunk Upload URLs",
+      "group": "upload",
+      "catalog": "AppGallery-connect-References",
+      "sha256": "0013aae6c20885b53d406c56795359ac3a365709e220afa1e4f28a3157cb0a04"
+    },
+    {
+      "id": "agcapi-obbfile-upload-0000001158245067",
+      "title": "Uploading File Chunks",
+      "group": "upload",
+      "catalog": "AppGallery-connect-References",
+      "sha256": "c6daf56590ab06cb33048cfeb036232db94f7b75ab265f228d8dafbd0a3b2ba8"
+    },
+    {
+      "id": "agcapi-obbfile-compose-0000001111845098",
+      "title": "Merging File Chunks",
+      "group": "upload",
+      "catalog": "AppGallery-connect-References",
+      "sha256": "3326557a747e98d76f2c135126def3c8c5a7421feadb9829e0a7c1e9388193ed"
+    },
+    {
+      "id": "agcapi-uploadapi-errorcode-harmonyos-0000002123259325",
+      "title": "Result Codes",
+      "group": "upload",
+      "catalog": "AppGallery-connect-References",
+      "sha256": "dccf5e440d292e43abf345902729f3860fae208472226ae6f052d25e18c8806d"
+    },
+    {
+      "id": "agcapi-provisioningapi-0000001948120189",
+      "title": "Provisioning API",
+      "group": "provisioning",
+      "catalog": "AppGallery-connect-References",
+      "sha256": "40bbc8fdbcdb6493c137b03fac15cf352e7f7936fe4f6d11878c83685a466e61"
+    },
+    {
+      "id": "agcapi-reportsapi-0000001111685194",
+      "title": "Reports API",
+      "group": "reports",
+      "catalog": "AppGallery-connect-References",
+      "sha256": "905f14b151b156dea0ab6da821e68febb236761663c5d720d6d4de1b7a27a504"
+    },
+    {
+      "id": "agcapi-reportsapi-android-0000002356786268",
+      "title": "HarmonyOS 3.1, 4.0, or Earlier, and Android",
+      "group": "reports",
+      "catalog": "AppGallery-connect-References",
+      "sha256": "28e0d8218860e63d4ce944d54e29980759ecb2f33b6473a88e90884b7a4b2c9d"
+    },
+    {
+      "id": "agcapi-appdownloadexport-0000001158365059",
+      "title": "Obtaining the Download and Installation Report URL",
+      "group": "reports",
+      "catalog": "AppGallery-connect-References",
+      "sha256": "20f268a8d34e3cd5608fd166f4695f917a997398047c8609c06b0544390d8d4e"
+    },
+    {
+      "id": "agcapi-iapexport-0000001158365061",
+      "title": "Obtaining the In-App Purchases Report URL",
+      "group": "reports",
+      "catalog": "AppGallery-connect-References",
+      "sha256": "4ad19612489a2f15d4ebdb79aaa9cc02c659919967b723381fc1002ee7207898"
+    },
+    {
+      "id": "agcapi-orderanalysisexport-0000001111685214",
+      "title": "Obtaining the Paid App Report URL",
+      "group": "reports",
+      "catalog": "AppGallery-connect-References",
+      "sha256": "ef9e14b561625f111c12f0c48a705882ec6d3ce86741b68fa71d013b19ccc40e"
+    },
+    {
+      "id": "agcapi-orderdetailexport-0000001158245073",
+      "title": "Obtaining the Paid App Details Report URL",
+      "group": "reports",
+      "catalog": "AppGallery-connect-References",
+      "sha256": "644cd4dbb3185f42d312d7f7a7c14680a2b70dc46fe972aab6fadc723adc8814"
+    },
+    {
+      "id": "agcapi-appdownloadfailexport-0000001158365063",
+      "title": "Obtaining the Installation Failure Data Report URL",
+      "group": "reports",
+      "catalog": "AppGallery-connect-References",
+      "sha256": "bb1169a035d76f7803dae4d5a6210089acb57365d9f996c4684eaa51000ffcf9"
+    },
+    {
+      "id": "agcapi-reportsapi-errorcode-0000001165183667",
+      "title": "Result Codes",
+      "group": "reports",
+      "catalog": "AppGallery-connect-References",
+      "sha256": "85315641910be78e215d067aa3f144463b60a60720043c5937ef5a4e62ba0405"
+    },
+    {
+      "id": "agcapi-pmapi-0000001158245053",
+      "title": "Project Management API",
+      "group": "project",
+      "catalog": "AppGallery-connect-References",
+      "sha256": "53967db83d3cd47e63b1268eb1d8d68bcada4445b8e1f66021098a9d9b0f3da0"
+    },
+    {
+      "id": "agcapi-getteamlist-0000001158245075",
+      "title": "Obtaining the Team List",
+      "group": "project",
+      "catalog": "AppGallery-connect-References",
+      "sha256": "6a3520792f19d6a9a8703599db509032a1fe2f6b121498495a98fd6c0d081217"
+    },
+    {
+      "id": "agcapi-appbriefinfo-0000001111845106",
+      "title": "Obtaining App Brief Information",
+      "group": "project",
+      "catalog": "AppGallery-connect-References",
+      "sha256": "8e14db961c062950e2872ec3267e02746b806e153dce5f09e3fd6ab45a1e1a9e"
+    },
+    {
+      "id": "agcapi-getconfigfile-0000001158365065",
+      "title": "Obtaining the Configuration File",
+      "group": "project",
+      "catalog": "AppGallery-connect-References",
+      "sha256": "0c5bf01baa5f22b484124b75e4a9cf50db9892528f7063f2f4b3b73938bcc8b4"
+    },
+    {
+      "id": "agcapi-addappfingerprint-0000001111685218",
+      "title": "Adding a Certificate Fingerprint",
+      "group": "project",
+      "catalog": "AppGallery-connect-References",
+      "sha256": "4641e52814435e21afac10a75c4f1ac9484251163cb7c2a57ded4d996c5f9e04"
+    },
+    {
+      "id": "agcapi-queryappfingerprint-0000001158245077",
+      "title": "Querying the Certificate Fingerprint and App Secret",
+      "group": "project",
+      "catalog": "AppGallery-connect-References",
+      "sha256": "abcc35c3fb9bfdbe50c602ad999d7996d929c979ea2c375f9cb69ef91df3fa66"
+    },
+    {
+      "id": "agcapi-queryservice-0000001111845108",
+      "title": "Querying Service Enabling Status",
+      "group": "project",
+      "catalog": "AppGallery-connect-References",
+      "sha256": "075c9f2cf67a280de81dc5bd7f5ca3d1fca4ffb8c7a490c6ef39aa775f906f90"
+    },
+    {
+      "id": "agcapi-queryprojectdetail-0000001158365067",
+      "title": "Querying Project Details and Apps Under the Project",
+      "group": "project",
+      "catalog": "AppGallery-connect-References",
+      "sha256": "3a3d7c01bcad88cc7b6be049d7af5062c019ae2f19f7158287e0160270e3a28c"
+    },
+    {
+      "id": "agcapi-queryprojectlist-0000001111685220",
+      "title": "Querying the Project List",
+      "group": "project",
+      "catalog": "AppGallery-connect-References",
+      "sha256": "e41ff60e0726ec30efc68f39820f431d786cf2a64f996b43cda2a2254323b912"
+    },
+    {
+      "id": "agcapi-pmapi-errorcode-0000001118183972",
+      "title": "Result Codes",
+      "group": "project",
+      "catalog": "AppGallery-connect-References",
+      "sha256": "d82e9ca54102975deb7c1ae3d4fa98dd22a5880e3e8a585e8d57039532f7290d"
+    },
+    {
+      "id": "agcapi-commentapi-0000001115868340",
+      "title": "Comments API",
+      "group": "comments",
+      "catalog": "AppGallery-connect-References",
+      "sha256": "da6ad652d1b027801d9c1b79915151912000c74adf43301e0f0b5f7942dd0ede"
+    },
+    {
+      "id": "agcapi-comment-api-0000002502827151",
+      "title": "HarmonyOS 3.1, 4.0, or Earlier, and Android",
+      "group": "comments",
+      "catalog": "AppGallery-connect-References",
+      "sha256": "baa850015420d5bc07f79b852dee097e04bc25b5a555825b2798f14f597336d3"
+    },
+    {
+      "id": "agcapi-comapi-getreviews-0000001162468139",
+      "title": "Querying the Comment List",
+      "group": "comments",
+      "catalog": "AppGallery-connect-References",
+      "sha256": "53f7f24520288cba05325637b9ebea1abbd637c23e5cb54c6ed7470b1d6821d3"
+    },
+    {
+      "id": "agcapi-com-getreviewinfo-0000001116028248",
+      "title": "Querying Details of a Comment",
+      "group": "comments",
+      "catalog": "AppGallery-connect-References",
+      "sha256": "62cd02df742ab33315c522e163c1bc4b5ff0a9ede48fddb1524db824e8542045"
+    },
+    {
+      "id": "agcapi-com-reviewreply-0000001162548117",
+      "title": "Replying to a Comment or Reply",
+      "group": "comments",
+      "catalog": "AppGallery-connect-References",
+      "sha256": "8e3d5b91517c82422314988188c6ca69ff5b1434ca28c6a4f1c31f3ad7e0a4cf"
+    },
+    {
+      "id": "agcapi-com-rating-0000001133889426",
+      "title": "Querying App Ratings",
+      "group": "comments",
+      "catalog": "AppGallery-connect-References",
+      "sha256": "afa8100ecccd7e2c3eacfb5606108c239317255f70c8619cc064efc46a0887b0"
+    },
+    {
+      "id": "agcapi-comment-data-0000001115868342",
+      "title": "Data Models",
+      "group": "comments",
+      "catalog": "AppGallery-connect-References",
+      "sha256": "af7b46bc2808e052c89b9785231b7cac8021c5c31ec5eed0f8b873b27b672bcf"
+    },
+    {
+      "id": "agcapi-com-cbresult-0000001162468141",
+      "title": "CommentBaseResult",
+      "group": "comments",
+      "catalog": "AppGallery-connect-References",
+      "sha256": "f0f762bf842ed01e62522de8ac7bf3c856b7f953c8410209e433d7509bbb1e4a"
+    },
+    {
+      "id": "agcapi-com-gdrrdata-0000001116028250",
+      "title": "GetDevReviewRspData",
+      "group": "comments",
+      "catalog": "AppGallery-connect-References",
+      "sha256": "9d86f8e916e52ba3025af2e259aa6d5ff0631233068778c7532db01773c0fef3"
+    },
+    {
+      "id": "agcapi-com-oreplyinfo-0000001162548119",
+      "title": "OpenReplyInfo",
+      "group": "comments",
+      "catalog": "AppGallery-connect-References",
+      "sha256": "b4f15d2268bb13ec4a6ba2f92a642cc890f0870395bf028c2ae3cdb92db11dfc"
+    },
+    {
+      "id": "agcapi-com-oreviewinfo-0000001115868344",
+      "title": "OpenReviewInfo",
+      "group": "comments",
+      "catalog": "AppGallery-connect-References",
+      "sha256": "fb4fc5830fcac8f4cb05c8dcc67e1d91dfcbd97fbf521290c3ef25371fd8e4b8"
+    },
+    {
+      "id": "agcapi-com-qdrrdata-0000001162468143",
+      "title": "QueryDevReviewsRspData",
+      "group": "comments",
+      "catalog": "AppGallery-connect-References",
+      "sha256": "394ad68ea973e9df24f6d74d67641873db9c715102a8d57d5c18d724ed66d9fd"
+    },
+    {
+      "id": "agcapi-com-gdarrdata-0000001134972868",
+      "title": "GetDevAppRatingRspData",
+      "group": "comments",
+      "catalog": "AppGallery-connect-References",
+      "sha256": "60b7dd1e0e0b1ded6f7c77f9abad2491cbfcd37da82e0bdd30301c44e6713c0f"
+    },
+    {
+      "id": "agcapi-com-openratingstat-0000001180812511",
+      "title": "OpenRatingStat",
+      "group": "comments",
+      "catalog": "AppGallery-connect-References",
+      "sha256": "d5da17c4bce2b272781a5cf13932e75c879d4dadc5496de338d41140484857e6"
+    },
+    {
+      "id": "agcapi-com-openrating-0000001180932437",
+      "title": "OpenRating",
+      "group": "comments",
+      "catalog": "AppGallery-connect-References",
+      "sha256": "94b0eebd554d7d50c08ea876de81c5eed1369e572a29168950ea60906234d87c"
+    },
+    {
+      "id": "agcapi-comment-returncode-0000001116028252",
+      "title": "Result Codes",
+      "group": "comments",
+      "catalog": "AppGallery-connect-References",
+      "sha256": "ba284ff1b3761752b76e79afda653b6a560b83b56f4f4fb01f54b9334cb74442"
+    },
+    {
+      "id": "agcapi-pmsapi-0000001162548121",
+      "title": "PMS API",
+      "group": "pms",
+      "catalog": "AppGallery-connect-References",
+      "sha256": "e698cddcddc05ffabaa51e5fd117ad215ed055563d2d5def0c4d4c220a02cb77"
+    },
+    {
+      "id": "agcapi-updateproductgroup-0000001162548123",
+      "title": "Updating a Product Subscription Group",
+      "group": "pms",
+      "catalog": "AppGallery-connect-References",
+      "sha256": "be4f9b1f5537864a01126440dac009e5c41217ac83b268c3c46bc33cba2011ea"
+    },
+    {
+      "id": "agcapi-getproductgroup-0000001115868348",
+      "title": "Querying a Product Subscription Group",
+      "group": "pms",
+      "catalog": "AppGallery-connect-References",
+      "sha256": "aad7f9133d27c0d168ed84c6ad62d7da62faf65aa50458fceca4d213c6974121"
+    },
+    {
+      "id": "agcapi-getproductinfo-0000001162468147",
+      "title": "Querying Details of a Product",
+      "group": "pms",
+      "catalog": "AppGallery-connect-References",
+      "sha256": "1d086a2ece1932a3e9d4e123884f587728c45277b07f9c0c93a76bbec86a5272"
+    },
+    {
+      "id": "agcapi-bygetproductinfo-0000001116028256",
+      "title": "Searching Products by Criteria",
+      "group": "pms",
+      "catalog": "AppGallery-connect-References",
+      "sha256": "a878893265a9dd70b0d9c9ebbe3c89529f8d26cc041465e1d0c8afb8474a8a8a"
+    },
+    {
+      "id": "agcapi-updateproduct-0000001162548125",
+      "title": "Updating a Product",
+      "group": "pms",
+      "catalog": "AppGallery-connect-References",
+      "sha256": "0ec0ed9aee61590f13568f839be64efe677af745ec4d3b53051f37907914644e"
+    },
+    {
+      "id": "agcapi-batchupdateproduct-0000001115868350",
+      "title": "Updating Products in Batches",
+      "group": "pms",
+      "catalog": "AppGallery-connect-References",
+      "sha256": "56be09ab216ce44ced9bb8db7a5251a026f59eb3f49d05b788816e8e568957cf"
+    },
+    {
+      "id": "agcapi-batchactproduct-0000001162468149",
+      "title": "Activating Products in Batches",
+      "group": "pms",
+      "catalog": "AppGallery-connect-References",
+      "sha256": "3d2af10eaf916a255088073a71f284acba5535bae3ef42d4eabf71db64d52b28"
+    },
+    {
+      "id": "agcapi-batchdeactproduct-0000001116028258",
+      "title": "Deactivating Products in Batches",
+      "group": "pms",
+      "catalog": "AppGallery-connect-References",
+      "sha256": "5d84a03a13014afc4945797382604fd8d738a9ac38409b85d56d372bda4bd18c"
+    },
+    {
+      "id": "agcapi-isproductactive-0000001162548127",
+      "title": "Checking for Released Products",
+      "group": "pms",
+      "catalog": "AppGallery-connect-References",
+      "sha256": "74b350708262dd345b12dc17a150e14b745eb834f340f8271da05cbd6bb4f048"
+    },
+    {
+      "id": "agcapi-addpromotion-0000001115868352",
+      "title": "Creating a Product Promotion",
+      "group": "pms",
+      "catalog": "AppGallery-connect-References",
+      "sha256": "6f5375a9eb514287265962a9d63739b43b7aaec5a1adec426ee3c17259107aa5"
+    },
+    {
+      "id": "agcapi-updatepromotion-0000001162468151",
+      "title": "Updating a Product Promotion",
+      "group": "pms",
+      "catalog": "AppGallery-connect-References",
+      "sha256": "bbd17d22a371345b19555d4f80e7771213851b52326d0bbe350ebaa0594eb6a0"
+    },
+    {
+      "id": "agcapi-getpromotioninfo-0000001116028260",
+      "title": "Querying Promotion Details of a Product",
+      "group": "pms",
+      "catalog": "AppGallery-connect-References",
+      "sha256": "f371d81a672423f525e2096931b082180db2a7b7784f77d92cd4078e5498cd03"
+    },
+    {
+      "id": "agcapi-bygetpromotioninfo-0000001162548129",
+      "title": "Searching Product Promotions by Criteria",
+      "group": "pms",
+      "catalog": "AppGallery-connect-References",
+      "sha256": "1b82656f815941cabacb3a0136c2cb959bcdaa596abc6b26ad213bdf3a3808e2"
+    },
+    {
+      "id": "agcapi-batchactpromotion-0000001115868354",
+      "title": "Releasing Product Promotions in Batches",
+      "group": "pms",
+      "catalog": "AppGallery-connect-References",
+      "sha256": "f5cba1aad6b1a331f3eefa178e71819c3f29fca776259075a3845107145b7dac"
+    },
+    {
+      "id": "agcapi-batchdeactpromotion-0000001162468153",
+      "title": "Removing Product Promotions in Batches",
+      "group": "pms",
+      "catalog": "AppGallery-connect-References",
+      "sha256": "c252cb0f0602480420c418f3c24b3ede6b79dea27939f0d9ad86dadc02602657"
+    },
+    {
+      "id": "agcapi-pms-data-0000001116028262",
+      "title": "Data Models",
+      "group": "pms",
+      "catalog": "AppGallery-connect-References",
+      "sha256": "c0c6252454dc45420e6d2480c36f0409c67db7c9609e1fee64e69edcc58a08a5"
+    },
+    {
+      "id": "agcapi-pms-cpriceinfo-0000001162548131",
+      "title": "CountryPriceInfo",
+      "group": "pms",
+      "catalog": "AppGallery-connect-References",
+      "sha256": "5c95eb809becf17525b5a8905d236b801bf3b005232d103f688d81e6fc07dcad"
+    },
+    {
+      "id": "agcapi-pms-dppriceinfo-0000001115868356",
+      "title": "DefaultProductPriceInfo",
+      "group": "pms",
+      "catalog": "AppGallery-connect-References",
+      "sha256": "a67bea83c9f44d284434080952a92c99827df828484c52dba1f6ef17ee4b0349"
+    },
+    {
+      "id": "agcapi-pms-errorresult-0000001162468155",
+      "title": "ErrorResult",
+      "group": "pms",
+      "catalog": "AppGallery-connect-References",
+      "sha256": "a7deee2ee5c08adad266a5cd43a06f8e5f771bacd4fdc5d0cbc3b3075a77fa46"
+    },
+    {
+      "id": "agcapi-pms-pcheckinfo-0000001116028264",
+      "title": "ProductCheckInfo",
+      "group": "pms",
+      "catalog": "AppGallery-connect-References",
+      "sha256": "094e9766e1facb4063c682e8e916a1d842b53023a4c66c213dd62ec46ad16a37"
+    },
+    {
+      "id": "agcapi-pms-pdetailinfo-0000001162548133",
+      "title": "ProductDetailInfo",
+      "group": "pms",
+      "catalog": "AppGallery-connect-References",
+      "sha256": "4729259d46dfd49094bed4264cdea9ee549ebc1929ace8dd5c9ebcec65a140ed"
+    },
+    {
+      "id": "agcapi-pms-pgroupinfo-0000001115868358",
+      "title": "ProductGroupInfo",
+      "group": "pms",
+      "catalog": "AppGallery-connect-References",
+      "sha256": "abe7304f2573f055507622b82d1bf0bb93f31f2f76a4ce15d3fe2b948d105225"
+    },
+    {
+      "id": "agcapi-pms-productinfo-0000001162468157",
+      "title": "ProductInfo",
+      "group": "pms",
+      "catalog": "AppGallery-connect-References",
+      "sha256": "57fb539710ba1eeb6dfaf018e727459e312560d4b51a1681f0175fb6eeeb01ae"
+    },
+    {
+      "id": "agcapi-pms-pimportinfo-0000001116028266",
+      "title": "ProductImportInfo",
+      "group": "pms",
+      "catalog": "AppGallery-connect-References",
+      "sha256": "91cbcb1eb7a4309f7da95f795add1407381396253801a1e9c54e32aff8c6ad58"
+    },
+    {
+      "id": "agcapi-pms-pierrorinfo-0000001162548135",
+      "title": "ProductImportErrorInfo",
+      "group": "pms",
+      "catalog": "AppGallery-connect-References",
+      "sha256": "b39dfe35ad4b43f809c6b47a3b893663dd70a70a71446de90888d15e4b972a95"
+    },
+    {
+      "id": "agcapi-pms-pdlanguageinfo-0000001115868360",
+      "title": "ProductLanguageInfo",
+      "group": "pms",
+      "catalog": "AppGallery-connect-References",
+      "sha256": "a9a5f6e059b2bcc23e7f6076977a96814af8001b3ea9a776c487f89ef2d99a68"
+    },
+    {
+      "id": "agcapi-pms-ppdetailinfo-0000001162468159",
+      "title": "ProductPromotionDetailInfo",
+      "group": "pms",
+      "catalog": "AppGallery-connect-References",
+      "sha256": "27bb17edf337d391779021e780af31563022a1c41634e80c510162adce944691"
+    },
+    {
+      "id": "agcapi-pms-ppromotioninfo-0000001116028268",
+      "title": "ProductPromotionInfo",
+      "group": "pms",
+      "catalog": "AppGallery-connect-References",
+      "sha256": "843352a9b81f42b460079a7a0906978d886576702fa0472e90bbf5b9abcf8dbf"
+    },
+    {
+      "id": "agcapi-pms-ppromotion-0000001162548137",
+      "title": "ProductPromotions",
+      "group": "pms",
+      "catalog": "AppGallery-connect-References",
+      "sha256": "0af9e6eac1a184e709eb1c40bc142d008860982c2b5b89274e6bcd8247568b20"
+    },
+    {
+      "id": "agcapi-pms-pqueryinfo-0000001115868362",
+      "title": "ProductsQueryInfo",
+      "group": "pms",
+      "catalog": "AppGallery-connect-References",
+      "sha256": "d3abf4daadf31171de5566aa1543220022a712ecbf7c6c14e8d092a465ef8b0f"
+    },
+    {
+      "id": "agcapi-pms-ppriceinfo-0000001162468161",
+      "title": "ProductPriceInfo",
+      "group": "pms",
+      "catalog": "AppGallery-connect-References",
+      "sha256": "9098916d9d5ddb34c7907adaa5e61cf9d7bf58f49a4017dfd6d38997e2c940b7"
+    },
+    {
+      "id": "agcapi-pms-perrorinfo-0000001116028270",
+      "title": "PromotionErrorInfo",
+      "group": "pms",
+      "catalog": "AppGallery-connect-References",
+      "sha256": "2e56b8f64fa432a9b4744ed8f806ca4e5e17c615360a933d49421f49d5613df7"
+    },
+    {
+      "id": "agcapi-pms-promotioninfo-0000001162548139",
+      "title": "PromotionInfo",
+      "group": "pms",
+      "catalog": "AppGallery-connect-References",
+      "sha256": "77d1f395446291cfd241594d364e5013975d9a56f02fa559f0135f06ffc063f2"
+    },
+    {
+      "id": "agcapi-pms-pintroduceinfo-0000001115868364",
+      "title": "PromotionIntroductoryInfo",
+      "group": "pms",
+      "catalog": "AppGallery-connect-References",
+      "sha256": "36b4aff32f7a9b24dfb8710d2e9ba64018b5a59f83a61497baa64f039f5aa4cb"
+    },
+    {
+      "id": "agcapi-pms-ptlanguageinfo-0000001162468163",
+      "title": "PromotionLanguageInfo",
+      "group": "pms",
+      "catalog": "AppGallery-connect-References",
+      "sha256": "a3f560da2d5fe8df44da321ff7b9abaf0d839c85b641dfd6ce7e209f5cd57f11"
+    },
+    {
+      "id": "agcapi-pms-ptpriceinfo-0000001116028272",
+      "title": "PromotionPriceInfo",
+      "group": "pms",
+      "catalog": "AppGallery-connect-References",
+      "sha256": "d89b544848b21619fd0cf12b1f10d57ad32444ccf98482ebc4c91cff5d64b0a1"
+    },
+    {
+      "id": "agcapi-pms-sgroupinfo-0000001162548141",
+      "title": "SimpleGroupInfo",
+      "group": "pms",
+      "catalog": "AppGallery-connect-References",
+      "sha256": "7b8f1254b3231e70d904c80a4a87fe180ea746cab04b2a2180246d4972167ca4"
+    },
+    {
+      "id": "agcapi-pms-returncode-0000001115868366",
+      "title": "Result Codes",
+      "group": "pms",
+      "catalog": "AppGallery-connect-References",
+      "sha256": "d91946c50a7e3efd9c9daee45e864acdf4138db7e0baf3d1051431a057e9f062"
+    },
+    {
+      "id": "agcapi-appendix-0000001111845084",
+      "title": "Appendix",
+      "group": "appendix",
+      "catalog": "AppGallery-connect-References",
+      "sha256": "b880039df1b438c5b4d7b7e19f17d427f36c26d5ca1088e8bcaef4dd25c888d1"
+    },
+    {
+      "id": "agcapi-reference-langtype-0000001158245079",
+      "title": "Languages",
+      "group": "appendix",
+      "catalog": "AppGallery-connect-References",
+      "sha256": "5a730d7458e4fa556e92127154c16664e9cb46622867224535d2bc031e475a21"
+    },
+    {
+      "id": "agcapi-reference-countrycode-0000001111845110",
+      "title": "Country/Region Codes",
+      "group": "appendix",
+      "catalog": "AppGallery-connect-References",
+      "sha256": "67b8216130f7fa23afc04aa223e6909a131a72edb31407bbdc548610ed237b76"
+    },
+    {
+      "id": "agcapi-reference-apptype-0000001158365069",
+      "title": "App/Game Categories",
+      "group": "appendix",
+      "catalog": "AppGallery-connect-References",
+      "sha256": "5ef5e2cb33376302a8a0415088586a13ff590070902f5f88e1084bbeafc25123"
+    },
+    {
+      "id": "agcapi-reference-applevel-0000001111685222",
+      "title": "App Rating",
+      "group": "appendix",
+      "catalog": "AppGallery-connect-References",
+      "sha256": "eca9a0907518ca7387ea191e5010dcbd5b2c63e6ba2982d9dead829b35b9b2ab"
+    },
+    {
+      "id": "agcapi-gettestkey-0000001158245081",
+      "title": "Obtaining the Public Key for Signature Verification",
+      "group": "appendix",
+      "catalog": "AppGallery-connect-References",
+      "sha256": "941a0643be6ab4306df943e7dcdd28553046e6391bf639ab3207f8581ca06b8b"
+    },
+    {
+      "id": "agcapi-reference-pricechange-0000001111845112",
+      "title": "Price Conversion Rules",
+      "group": "appendix",
+      "catalog": "AppGallery-connect-References",
+      "sha256": "97bdc3c9d3e64656439f1b32cc40dbf37b9253f16b7c1ec0648a416cb5441b8d"
+    },
+    {
+      "id": "agcapi-file-requirement-0000001158365071",
+      "title": "App File Restrictions",
+      "group": "appendix",
+      "catalog": "AppGallery-connect-References",
+      "sha256": "777d56ab620a053a66bcb29145c06b8d8113d7bea8a62ede8f89456a4f39bb9d"
+    },
+    {
+      "id": "agc-help-connect-api-introduction-0000002270974725",
+      "title": "Service Introduction",
+      "group": "guide",
+      "catalog": "app",
+      "sha256": "cdb6db1bd918f81effbac3df5739b9e128674c5ba78e2a0847ad995d10fc1ad7"
+    },
+    {
+      "id": "agc-help-connect-api-obtain-server-auth-0000002271134661",
+      "title": "Obtaining Authorization from the Server",
+      "group": "guide",
+      "catalog": "app",
+      "sha256": "81dc573e94e6b8aaddff0b11820dcc63563a7e17b0a1505a32774d6e5cdc5e58"
+    },
+    {
+      "id": "agc-help-upload-api-guide-0000002271160549",
+      "title": "Upload Management API",
+      "group": "upload",
+      "catalog": "app",
+      "sha256": "f3bda5474f73af92f1629de18522119b3a2e9caf2ec0480807c49d71a530ae84"
+    },
+    {
+      "id": "agc-help-upload-api-reference-0000002236041486",
+      "title": "Upload Management API Reference",
+      "group": "upload",
+      "catalog": "app",
+      "sha256": "6f384dd7617efc4b9bef4d7f8bbfa2d753148f425e4b1a31192bc042c6e0ff62"
+    },
+    {
+      "id": "agc-help-upload-api-upload-url-0000002236201294",
+      "title": "Obtaining the File Upload URL",
+      "group": "upload",
+      "catalog": "app",
+      "sha256": "201be023bd9b0e7f0721bc07bc8f622e76bb57209c1b440c42f71d0350cf786c"
+    },
+    {
+      "id": "agc-help-upload-api-upload-file-0000002271160621",
+      "title": "Uploading a File",
+      "group": "upload",
+      "catalog": "app",
+      "sha256": "e34a111789411c22f33511c019133ceca7e238e2580d9e68716ece6c43bc3ca0"
+    },
+    {
+      "id": "agc-help-upload-api-obbfile-init-0000002271000677",
+      "title": "Initializing Chunk Information",
+      "group": "upload",
+      "catalog": "app",
+      "sha256": "025c51ee8701f9380321802b4c4cf492a59e68b4006f9499b47d3cf0c622cd7d"
+    },
+    {
+      "id": "agc-help-upload-api-obbfile-uploadurl-0000002236041490",
+      "title": "Obtaining Chunk Upload URLs",
+      "group": "upload",
+      "catalog": "app",
+      "sha256": "e06a9c3ff8088cbde0ed8b5558b6b700c67d58415d7ace73832183a9512c2461"
+    },
+    {
+      "id": "agc-help-upload-api-obbfile-upload-0000002236201298",
+      "title": "Uploading a Chunk",
+      "group": "upload",
+      "catalog": "app",
+      "sha256": "670504fdb3f36f1da8f3bc56469bdf345d41ae6ba343cdf1454d66c2fc7a54bb"
+    },
+    {
+      "id": "agc-help-upload-api-obbfile-compose-0000002271160625",
+      "title": "Merging Chunks",
+      "group": "upload",
+      "catalog": "app",
+      "sha256": "ed3f74604142bc93efbbc891c1ff40079e660b5907796f627149579beccdbebb"
+    },
+    {
+      "id": "agc-help-upload-api-data-0000002272457913",
+      "title": "Data Models",
+      "group": "upload",
+      "catalog": "app",
+      "sha256": "8c4bde2f46dc21f557dca9d3ec5b1f8dd68bba9ea943be060fd3ee3de898328c"
+    },
+    {
+      "id": "agc-help-upload-api-data-commonurlinfo-0000002272577809",
+      "title": "CommonUrlInfo",
+      "group": "upload",
+      "catalog": "app",
+      "sha256": "62355d05f82ed5063f429cbc64f3550b2c96deb8d75a8797fa9622047ddc584a"
+    },
+    {
+      "id": "agc-help-upload-api-data-connectret-0000002273607369",
+      "title": "ConnectRet",
+      "group": "upload",
+      "catalog": "app",
+      "sha256": "2bafe2e2a73ef404cf3f60d36a25e12242b159b7a6acc283bcc9cb6a88ec137e"
+    },
+    {
+      "id": "agc-help-upload-api-data-filepartcomposeinfo-0000002272457917",
+      "title": "FilePartComposeInfo",
+      "group": "upload",
+      "catalog": "app",
+      "sha256": "b6e3ac192cc337698c77bc8b6895ce7e710c84be90e06d1bfe23374dfc5011c5"
+    },
+    {
+      "id": "agc-help-upload-api-data-filepartinfo-0000002237498540",
+      "title": "FilePartInfo",
+      "group": "upload",
+      "catalog": "app",
+      "sha256": "deedd5f1ee028be17847a7f91648b2b45d98337c496f8bb990f8fa3e001458f6"
+    },
+    {
+      "id": "agc-help-upload-api-data-filepartuploadinfo-0000002237338748",
+      "title": "FilePartUploadInfo",
+      "group": "upload",
+      "catalog": "app",
+      "sha256": "6576246d2acb931d4322522173dc1325d251dad2170ba6d9b83e05d907e4692d"
+    },
+    {
+      "id": "agc-help-upload-api-errorcode-0000002271000681",
+      "title": "Result Codes",
+      "group": "upload",
+      "catalog": "app",
+      "sha256": "14a4aa5f74195ea32798fecbb2d5f9664a90412f25278d3aee536951b06c0878"
+    },
+    {
+      "id": "agc-help-provision-api-guide-0000002271000601",
+      "title": "Provisioning API Guide",
+      "group": "provisioning",
+      "catalog": "app",
+      "sha256": "51d59a311b32d2faf74e147bfa8f00ca9fa70dbda16d7bf0d747c35fee8fe575"
+    },
+    {
+      "id": "agc-help-provision-api-reference-0000002236041494",
+      "title": "Provisioning API Reference",
+      "group": "provisioning",
+      "catalog": "app",
+      "sha256": "4ed1d705325762e42fa779f15cfe3ed337419979754eb64147e1e951e464ef7d"
+    },
+    {
+      "id": "agc-help-provision-api-apply-cent-0000002236201302",
+      "title": "Requesting a Certificate",
+      "group": "provisioning",
+      "catalog": "app",
+      "sha256": "82aa75742327ecdef4ec68c2f3a0fb94150593be8d7ba3b556d227ec07681048"
+    },
+    {
+      "id": "agc-help-provision-api-query-cent-0000002271160629",
+      "title": "Querying a Certificate",
+      "group": "provisioning",
+      "catalog": "app",
+      "sha256": "759103a5a31bf8874bf39d4d24afb06754b416d17757bbe7008101de5c171671"
+    },
+    {
+      "id": "agc-help-provision-api-delete-cent-0000002271000685",
+      "title": "Deleting Certificates",
+      "group": "provisioning",
+      "catalog": "app",
+      "sha256": "907e64323b55deb0da44c0c10f61592f53ab973dcc776f6f1f36cc81121adbaf"
+    },
+    {
+      "id": "agc-help-provision-api-add-device-0000002236041498",
+      "title": "Adding Devices in Batches",
+      "group": "provisioning",
+      "catalog": "app",
+      "sha256": "0b6c47a39d33b61bbbcb8f06acea30c186643d260b0e1b80e850876576bdaa74"
+    },
+    {
+      "id": "agc-help-provision-api-query-device-0000002236201306",
+      "title": "Querying the Device List",
+      "group": "provisioning",
+      "catalog": "app",
+      "sha256": "7d932fa6419b769b7d355e4652505addb9eb303d1af7e6e05318f40b4ea615fa"
+    },
+    {
+      "id": "agc-help-provision-api-delete-device-0000002271160633",
+      "title": "Deleting Devices",
+      "group": "provisioning",
+      "catalog": "app",
+      "sha256": "5919f50d8dee15429b83ae15c74d842f2cf71a59ceca060945e93b88221f8925"
+    },
+    {
+      "id": "agc-help-provision-api-apply-provision-0000002271000689",
+      "title": "Requesting a Profile",
+      "group": "provisioning",
+      "catalog": "app",
+      "sha256": "d5e120ca953860ae6a4b47dabda410990e557a8d424ea89472f3f74817433e77"
+    },
+    {
+      "id": "agc-help-provision-api-query-provision-0000002236041506",
+      "title": "Querying the Profile List",
+      "group": "provisioning",
+      "catalog": "app",
+      "sha256": "58f2ea2093e3620ce7d804c75f2db37a2cb976e7003d9f0d2b6b28b99d0085c9"
+    },
+    {
+      "id": "agc-help-provision-api-update-provision-0000002469198766",
+      "title": "Modifying Devices Bound to a Profile",
+      "group": "provisioning",
+      "catalog": "app",
+      "sha256": "8735efe3783d2efac260d9fdd4e956c240fef08f5a717426fefa390e375bfea7"
+    },
+    {
+      "id": "agc-help-provision-api-delete-provision-0000002236201310",
+      "title": "Deleting a Profile",
+      "group": "provisioning",
+      "catalog": "app",
+      "sha256": "9ba590348dd9076cff78ae38749a605cf3780880ec44bddf420db92fd95f1857"
+    },
+    {
+      "id": "agc-help-provision-api-data-0000002271160637",
+      "title": "Data Models",
+      "group": "provisioning",
+      "catalog": "app",
+      "sha256": "754c17a92e37b060c83772b3e11a4d56d1b92631fb4fe6d5e755d9a6e7c41316"
+    },
+    {
+      "id": "agc-help-provision-api-data-adddeviceinfo-0000002236201314",
+      "title": "AddDeviceInfo",
+      "group": "provisioning",
+      "catalog": "app",
+      "sha256": "21f1ee3b73cb984ea3377c4b94eb8d23bcc3bf8ad19dc528948a2a586e7d5c36"
+    },
+    {
+      "id": "agc-help-provision-api-data-adddeviceresult-0000002271160641",
+      "title": "AddDeviceResult",
+      "group": "provisioning",
+      "catalog": "app",
+      "sha256": "6141a5c3f0ae98ef0c08471a11e3e544ed2bfa3ce639ad6aa28c435b17097aa8"
+    },
+    {
+      "id": "agc-help-provision-api-data-certinfo-0000002236041510",
+      "title": "CertInfo",
+      "group": "provisioning",
+      "catalog": "app",
+      "sha256": "c11e6afb03194db2863d13594d621004b2c5b0b1daf574c7f4ef74f7fba0a1dd"
+    },
+    {
+      "id": "agc-help-provision-api-data-connectret-0000002271000693",
+      "title": "ConnectRet",
+      "group": "provisioning",
+      "catalog": "app",
+      "sha256": "2bafe2e2a73ef404cf3f60d36a25e12242b159b7a6acc283bcc9cb6a88ec137e"
+    },
+    {
+      "id": "agc-help-provision-api-data-deviceinfo-0000002271000697",
+      "title": "DeviceInfo",
+      "group": "provisioning",
+      "catalog": "app",
+      "sha256": "e96805494fe92a2847dba48852243132c95cff70b90d538384744a54c67b4c38"
+    },
+    {
+      "id": "agc-help-provision-api-data-provisioninfo-0000002236041514",
+      "title": "ProvisionInfo",
+      "group": "provisioning",
+      "catalog": "app",
+      "sha256": "48a160a81ad039fbc5dff354e3a1efa52a6299a85467d2af646077c588b0a548"
+    },
+    {
+      "id": "agc-help-provision-api-errorcode-0000002236201322",
+      "title": "Result Codes",
+      "group": "provisioning",
+      "catalog": "app",
+      "sha256": "e3c066571646676d38a399d23f5e6f575df7a66f8f67a9d8ae7e6f24cdeb9df7"
+    },
+    {
+      "id": "agc-help-connect-api-appendix-0000002271000741",
+      "title": "Appendixes",
+      "group": "appendix",
+      "catalog": "app",
+      "sha256": "debb6e619881af41512da783d21a874b9dedc6c59295f1b62395c2c074d0dde5"
+    },
+    {
+      "id": "agc-help-connect-api-appendix-langtype-0000002236041558",
+      "title": "Languages",
+      "group": "appendix",
+      "catalog": "app",
+      "sha256": "5a730d7458e4fa556e92127154c16664e9cb46622867224535d2bc031e475a21"
+    },
+    {
+      "id": "agc-help-connect-api-appendix-countrycode-0000002236201362",
+      "title": "Country/Region Codes",
+      "group": "appendix",
+      "catalog": "app",
+      "sha256": "c2758d690cc5793f2217808206bc6cc14574ec9c76bc9b8fb4623645ebaf4624"
+    },
+    {
+      "id": "agc-help-connect-api-appendix-apptype-0000002271160689",
+      "title": "App/Game Categories",
+      "group": "appendix",
+      "catalog": "app",
+      "sha256": "5a30fb4829495f6c7332ad3240aa823a8c322c32c30968082fb60ba4f9288d1b"
+    },
+    {
+      "id": "agc-help-connect-api-appendix-applevel-0000002271000745",
+      "title": "App Rating",
+      "group": "appendix",
+      "catalog": "app",
+      "sha256": "be0d585865191cd930560da025dafc0a1c6e7d72ec701c8c7ad7d02f8cf795ff"
+    },
+    {
+      "id": "agc-help-connect-api-appendix-gettestkey-0000002236041566",
+      "title": "Obtaining the Public Key for Signature Verification",
+      "group": "appendix",
+      "catalog": "app",
+      "sha256": "941a0643be6ab4306df943e7dcdd28553046e6391bf639ab3207f8581ca06b8b"
+    },
+    {
+      "id": "agc-help-connect-pi-appendix-pricechange-0000002236201366",
+      "title": "Price Conversion Rules",
+      "group": "appendix",
+      "catalog": "app",
+      "sha256": "25f654d4ddb66556e266c35a17a347146a6d8166b46512b03ddf11010d74eeb3"
+    },
+    {
+      "id": "agc-help-connect-api-appendix-requirement-0000002271160693",
+      "title": "App File Restrictions",
+      "group": "appendix",
+      "catalog": "app",
+      "sha256": "eedfdc038c141ec81313d8803cfe25ba654bb63dce5b2ceea1dcf12edb7a7855"
+    }
+  ]
+}

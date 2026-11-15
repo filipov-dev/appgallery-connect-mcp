@@ -1,0 +1,138 @@
+---
+source: crates/appgallery-connect-api/tests/operations.rs
+expression: "snapshot_view(op(\"list_app_brief_info\"))"
+---
+{
+  "access": "read",
+  "body": null,
+  "description": "Pass appId or packageNames (comma-separated); appId wins when both are passed. The userID header is the team account ID. The reference documents this operation for the OAuth client mode only.",
+  "group": "project",
+  "input_schema": {
+    "additionalProperties": false,
+    "properties": {
+      "appDistStatus": {
+        "description": "App distribution status list. Use commas (,) to separate multiple records. -999: reviewing -995: updating 0: rejected 1: removed (including forcible removal) 62: releasing 101: released (including update and removal failure scenarios) 99999: removal applied 9998: draft 9997: deleted",
+        "type": "string"
+      },
+      "appId": {
+        "description": "List of app IDs to be queried. Use commas (,) to separate multiple IDs. Either appId or packageNames must be passed. If both of them are passed, appId is used.",
+        "type": "string"
+      },
+      "appType": {
+        "description": "App type. 1: mobile app (including common apps and games) 2: Vision app 4: router app 8: VR gadget app 9: watch app 19: quick app 23: Vision quick app 27: head unit app 28: head unit quick app 29: sports watch app 30: cloud game 9998: iOS app 9999: web app",
+        "type": "string"
+      },
+      "fromRecCount": {
+        "description": "Start page number. The value is a positive integer, which indicates an order in a list. If no value is passed, the default value 1 is used.",
+        "type": "integer"
+      },
+      "maxReqCount": {
+        "description": "Number of records returned on each page. The default value is 20, and the maximum value is 1000.",
+        "type": "integer"
+      },
+      "packageNames": {
+        "description": "List of app package names to be queried. Use commas (,) to separate multiple package names. A maximum of 100 package names are supported. Either appId or packageNames must be passed. If both of them are passed, appId is used.",
+        "type": "string"
+      },
+      "sortType": {
+        "description": "Sorting order.",
+        "type": "string"
+      },
+      "userID": {
+        "description": "ID of the team account holder, that is, the team account ID. To obtain the team ID, call the obtaining the team account list.",
+        "type": "integer"
+      }
+    },
+    "required": [
+      "userID"
+    ],
+    "type": "object"
+  },
+  "method": "GET",
+  "operation_id": "project.appBriefInfo.list",
+  "params": [
+    {
+      "api_name": "appId",
+      "description": "List of app IDs to be queried. Use commas (,) to separate multiple IDs. Either appId or packageNames must be passed. If both of them are passed, appId is used.",
+      "location": "Query",
+      "name": "appId",
+      "repeated": false,
+      "required": false,
+      "value_type": "String"
+    },
+    {
+      "api_name": "packageNames",
+      "description": "List of app package names to be queried. Use commas (,) to separate multiple package names. A maximum of 100 package names are supported. Either appId or packageNames must be passed. If both of them are passed, appId is used.",
+      "location": "Query",
+      "name": "packageNames",
+      "repeated": false,
+      "required": false,
+      "value_type": "String"
+    },
+    {
+      "api_name": "appType",
+      "description": "App type. 1: mobile app (including common apps and games) 2: Vision app 4: router app 8: VR gadget app 9: watch app 19: quick app 23: Vision quick app 27: head unit app 28: head unit quick app 29: sports watch app 30: cloud game 9998: iOS app 9999: web app",
+      "location": "Query",
+      "name": "appType",
+      "repeated": false,
+      "required": false,
+      "value_type": "String"
+    },
+    {
+      "api_name": "appDistStatus",
+      "description": "App distribution status list. Use commas (,) to separate multiple records. -999: reviewing -995: updating 0: rejected 1: removed (including forcible removal) 62: releasing 101: released (including update and removal failure scenarios) 99999: removal applied 9998: draft 9997: deleted",
+      "location": "Query",
+      "name": "appDistStatus",
+      "repeated": false,
+      "required": false,
+      "value_type": "String"
+    },
+    {
+      "api_name": "fromRecCount",
+      "description": "Start page number. The value is a positive integer, which indicates an order in a list. If no value is passed, the default value 1 is used.",
+      "location": "Query",
+      "name": "fromRecCount",
+      "repeated": false,
+      "required": false,
+      "value_type": "Integer"
+    },
+    {
+      "api_name": "maxReqCount",
+      "description": "Number of records returned on each page. The default value is 20, and the maximum value is 1000.",
+      "location": "Query",
+      "name": "maxReqCount",
+      "repeated": false,
+      "required": false,
+      "value_type": "Integer"
+    },
+    {
+      "api_name": "sortType",
+      "description": "Sorting order.",
+      "location": "Query",
+      "name": "sortType",
+      "repeated": false,
+      "required": false,
+      "value_type": "String"
+    },
+    {
+      "api_name": "userID",
+      "description": "ID of the team account holder, that is, the team account ID. To obtain the team ID, call the obtaining the team account list.",
+      "location": "Header",
+      "name": "userID",
+      "repeated": false,
+      "required": true,
+      "value_type": "Integer"
+    }
+  ],
+  "path": "/api/cds/app-distirbution/v1/all/app-brief-info/list",
+  "reference": "https://developer.huawei.com/consumer/en/doc/development/AppGallery-connect-References/agcapi-appbriefinfo-0000001111845106",
+  "response": "Json",
+  "result": {
+    "code_field": "code",
+    "field": "ret",
+    "message_field": "msg"
+  },
+  "summary": "Returns brief information about apps by app IDs or package names: name, project, package name, type.",
+  "tool_name": "list_app_brief_info",
+  "toolset": "projects"
+}

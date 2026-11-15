@@ -1,0 +1,98 @@
+---
+source: crates/appgallery-connect-api/tests/operations.rs
+expression: "snapshot_view(op(\"reply_review\"))"
+---
+{
+  "access": "destructive",
+  "body": "Json",
+  "description": "The reply is visible to AppGallery users. Pass toReplyId to answer a specific user reply or updateReplyId to change an existing developer reply, not both. The requestId header is a unique request ID chosen by the caller, up to 64 characters.\n\nDestructive: publishes a reply that all AppGallery users see.",
+  "group": "comments",
+  "input_schema": {
+    "additionalProperties": false,
+    "properties": {
+      "body": {
+        "description": "Request body: JSON object.",
+        "properties": {
+          "appId": {
+            "description": "App ID.",
+            "type": "string"
+          },
+          "countryCode": {
+            "description": "Country/Region code, which complies with the country/region codes defined in the ISO standard.",
+            "type": "string"
+          },
+          "devReplyContent": {
+            "description": "Reply content.",
+            "type": "string"
+          },
+          "lang": {
+            "description": "Language, for example, zh_CN. The value consists of a language code defined in ISO-639-1 and a country/region code, separated with an underscore (_).",
+            "type": "string"
+          },
+          "reviewId": {
+            "description": "Comment ID.",
+            "type": "string"
+          },
+          "toReplyId": {
+            "description": "Reply ID. This parameter needs to be passed only when you need to reply to a specific user reply.",
+            "type": "string"
+          },
+          "updateReplyId": {
+            "description": "Reply ID. This parameter needs to be passed only when you need to modify a reply. The toReplyId and updateReplyId parameters cannot be passed at the same time.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "lang",
+          "appId",
+          "reviewId",
+          "devReplyContent",
+          "countryCode"
+        ],
+        "type": "object"
+      },
+      "requestId": {
+        "description": "Request ID. The value contains up to 64 characters and must be unique. This parameter is defined by you and used to check whether a request is duplicate.",
+        "type": "string"
+      }
+    },
+    "required": [
+      "requestId",
+      "body"
+    ],
+    "type": "object"
+  },
+  "method": "POST",
+  "operation_id": "comments.review.reply",
+  "params": [
+    {
+      "api_name": "requestId",
+      "description": "Request ID. The value contains up to 64 characters and must be unique. This parameter is defined by you and used to check whether a request is duplicate.",
+      "location": "Header",
+      "name": "requestId",
+      "repeated": false,
+      "required": true,
+      "value_type": "String"
+    },
+    {
+      "api_name": "body",
+      "description": "Request body: JSON object.",
+      "location": "Body",
+      "name": "body",
+      "repeated": false,
+      "required": true,
+      "value_type": "Object"
+    }
+  ],
+  "path": "/api/reviews/v1/manage/dev/reviews",
+  "reference": "https://developer.huawei.com/consumer/en/doc/development/AppGallery-connect-References/agcapi-com-reviewreply-0000001162548117",
+  "response": "Json",
+  "result": {
+    "code_field": "rtnCode",
+    "field": "ret",
+    "message_field": "rtnDesc"
+  },
+  "summary": "Publishes a developer reply to a review or to a user reply, or edits an earlier developer reply.",
+  "tool_name": "reply_review",
+  "toolset": "reviews"
+}

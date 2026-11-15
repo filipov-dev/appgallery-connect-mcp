@@ -1,0 +1,137 @@
+---
+source: crates/appgallery-connect-api/tests/operations.rs
+expression: "snapshot_view(op(\"submit_app\"))"
+---
+{
+  "access": "destructive",
+  "body": "Json",
+  "description": "The app information must be complete and the package uploaded and parsed (about two minutes after the upload). Without releaseTime the version is released right after approval. With releaseType 3 the version is released by phase: the body must then carry the phased release start and end time, percentage and description, and the app must already have a released version. Submission starts the review and cannot be undone through the API.\n\nDestructive: sends the version for review; after approval it is released to AppGallery users.",
+  "group": "publishing",
+  "input_schema": {
+    "additionalProperties": false,
+    "properties": {
+      "appId": {
+        "description": "App ID.",
+        "type": "string"
+      },
+      "body": {
+        "description": "Request body: JSON object.",
+        "properties": {
+          "isCommitSensitivePermissionTips": {
+            "description": "Confirms that the app has no prohibited functions (intrusive pop-ups and ads, undeletable notifications, prompts to enable developer options or USB debugging, malicious hot patches). Required and must be true when isPureDetection is 1.",
+            "type": "boolean"
+          },
+          "isPureDetection": {
+            "description": "Indicates whether to request green app certification. Options: 0: no 1: yes",
+            "type": "integer"
+          },
+          "phasedReleaseDescription": {
+            "description": "Phased release description.",
+            "maxLength": 500,
+            "type": "string"
+          },
+          "phasedReleaseEndTime": {
+            "description": "End time of phased release, in UTC format. The format is yyyy-MM-ddTHH:mm:ssZZ. Example: 2015-01-01T01:01:01+0800",
+            "maxLength": 64,
+            "type": "string"
+          },
+          "phasedReleasePercent": {
+            "description": "Share of users in the phased release, from 0.00 to 100.00 with up to two decimal places, without the percent sign.",
+            "maxLength": 10,
+            "type": "string"
+          },
+          "phasedReleaseStartTime": {
+            "description": "Start time of phased release, in UTC format. The format is yyyy-MM-ddTHH:mm:ssZZ. Example: 2015-01-01T01:01:01+0800",
+            "maxLength": 64,
+            "type": "string"
+          },
+          "sensitivePermissionIconUrl": {
+            "description": "Object ID of the green app certification material (a ZIP archive uploaded through the Upload Management API). Required when isPureDetection is 1.",
+            "type": "string"
+          },
+          "state": {
+            "description": "It is unnecessary to set the parameter.",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "releaseTime": {
+        "description": "Release time in UTC format. The format is yyyy-MM-ddTHH:mm:ssZZ. Example: 2015-01-01T01:01:01+0800 If releaseTime is not specified, the app will be released immediately after being approved.",
+        "type": "string"
+      },
+      "releaseType": {
+        "description": "App release type. Options: 1: on the entire network 3: by phase If this parameter is set to 3, your app must have a version that has already been released. The default value is 1.",
+        "type": "integer"
+      },
+      "remark": {
+        "description": "Remarks. This parameter can be left empty. If this parameter is set, the value contains 10 to 300 characters.",
+        "type": "string"
+      }
+    },
+    "required": [
+      "appId"
+    ],
+    "type": "object"
+  },
+  "method": "POST",
+  "operation_id": "publishing.app.submit",
+  "params": [
+    {
+      "api_name": "appId",
+      "description": "App ID.",
+      "location": "Query",
+      "name": "appId",
+      "repeated": false,
+      "required": true,
+      "value_type": "String"
+    },
+    {
+      "api_name": "releaseTime",
+      "description": "Release time in UTC format. The format is yyyy-MM-ddTHH:mm:ssZZ. Example: 2015-01-01T01:01:01+0800 If releaseTime is not specified, the app will be released immediately after being approved.",
+      "location": "Query",
+      "name": "releaseTime",
+      "repeated": false,
+      "required": false,
+      "value_type": "String"
+    },
+    {
+      "api_name": "remark",
+      "description": "Remarks. This parameter can be left empty. If this parameter is set, the value contains 10 to 300 characters.",
+      "location": "Query",
+      "name": "remark",
+      "repeated": false,
+      "required": false,
+      "value_type": "String"
+    },
+    {
+      "api_name": "releaseType",
+      "description": "App release type. Options: 1: on the entire network 3: by phase If this parameter is set to 3, your app must have a version that has already been released. The default value is 1.",
+      "location": "Query",
+      "name": "releaseType",
+      "repeated": false,
+      "required": false,
+      "value_type": "Integer"
+    },
+    {
+      "api_name": "body",
+      "description": "Request body: JSON object.",
+      "location": "Body",
+      "name": "body",
+      "repeated": false,
+      "required": false,
+      "value_type": "Object"
+    }
+  ],
+  "path": "/api/publish/v2/app-submit",
+  "reference": "https://developer.huawei.com/consumer/en/doc/development/AppGallery-connect-References/agcapi-app-submit-0000001158245061",
+  "response": "Json",
+  "result": {
+    "code_field": "code",
+    "field": "ret",
+    "message_field": "msg"
+  },
+  "summary": "Submits the app version for review and release.",
+  "tool_name": "submit_app",
+  "toolset": "releases"
+}

@@ -1,0 +1,73 @@
+---
+source: crates/appgallery-connect-api/tests/operations.rs
+expression: "snapshot_view(op(\"get_app_info\"))"
+---
+{
+  "access": "read",
+  "body": null,
+  "description": "Without lang the listings in all languages are returned. releaseType selects the full release (1) or the phased release (3) version of the data. appInfo.releaseState holds the review and release status of the version.",
+  "group": "publishing",
+  "input_schema": {
+    "additionalProperties": false,
+    "properties": {
+      "appId": {
+        "description": "ID of an app to be queried.",
+        "type": "string"
+      },
+      "lang": {
+        "description": "Language. If this parameter is not passed, app information in all languages is queried.",
+        "type": "string"
+      },
+      "releaseType": {
+        "description": "App release type. Options: 1: on the entire network 3: by phase The default value is 1.",
+        "type": "integer"
+      }
+    },
+    "required": [
+      "appId"
+    ],
+    "type": "object"
+  },
+  "method": "GET",
+  "operation_id": "publishing.appInfo.get",
+  "params": [
+    {
+      "api_name": "appId",
+      "description": "ID of an app to be queried.",
+      "location": "Query",
+      "name": "appId",
+      "repeated": false,
+      "required": true,
+      "value_type": "String"
+    },
+    {
+      "api_name": "lang",
+      "description": "Language. If this parameter is not passed, app information in all languages is queried.",
+      "location": "Query",
+      "name": "lang",
+      "repeated": false,
+      "required": false,
+      "value_type": "String"
+    },
+    {
+      "api_name": "releaseType",
+      "description": "App release type. Options: 1: on the entire network 3: by phase The default value is 1.",
+      "location": "Query",
+      "name": "releaseType",
+      "repeated": false,
+      "required": false,
+      "value_type": "Integer"
+    }
+  ],
+  "path": "/api/publish/v2/app-info",
+  "reference": "https://developer.huawei.com/consumer/en/doc/development/AppGallery-connect-References/agcapi-app-info-query-0000001158365045",
+  "response": "Json",
+  "result": {
+    "code_field": "code",
+    "field": "ret",
+    "message_field": "msg"
+  },
+  "summary": "Returns app details: basic information, localized listings, review comments and the phased release state.",
+  "tool_name": "get_app_info",
+  "toolset": "apps"
+}

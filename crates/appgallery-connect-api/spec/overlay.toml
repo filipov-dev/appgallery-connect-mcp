@@ -1,0 +1,421 @@
+# Файл-дополнение к снимку спецификации AppGallery Connect API (spec/openapi.json).
+#
+# Здесь всё, чего нет в справочнике Huawei: группы API, наборы инструментов, имена
+# инструментов, исключения из уровня доступа, исключённые операции и замены для них.
+# Операции называются по `operationId` снимка (`publishing.appInfo.get`), внешние
+# операции — по ключу в `x-agc-external-operations` (`upload.file.put`).
+#
+# Ошибки сборки: операция без набора (кроме исключённых с `callable = false`), операция
+# в двух наборах, операция без имени инструмента (кроме исключённых), повтор имени, имя
+# длиннее 40 символов, ссылка на операцию или группу, которых нет в снимке, группа снимка
+# без записи здесь, исключение из уровня доступа, совпадающее с уровнем по умолчанию,
+# неизвестные ключи, путь секретного поля, которого нет в схеме ответа.
+#
+# Тексты description, reason, alternative и hint — для агента, на английском.
+
+# ---------------------------------------------------------------------------
+# Группы API (`x-agc-group` снимка) в порядке вывода: название раздела справочника
+# и его адрес.
+# ---------------------------------------------------------------------------
+
+[[groups]]
+slug = "auth"
+title = "Authentication"
+reference = "https://developer.huawei.com/consumer/en/doc/development/AppGallery-connect-References/agcapi-obtain_token-0000001158365043"
+
+[[groups]]
+slug = "publishing"
+title = "Publishing API"
+reference = "https://developer.huawei.com/consumer/en/doc/development/AppGallery-connect-References/agcapi-publishing-api-0000002351880118"
+
+[[groups]]
+slug = "upload"
+title = "Upload Management API"
+reference = "https://developer.huawei.com/consumer/en/doc/development/AppGallery-connect-References/agcapi-uploadapi-0000002092927786"
+
+[[groups]]
+slug = "reports"
+title = "Reports API"
+reference = "https://developer.huawei.com/consumer/en/doc/development/AppGallery-connect-References/agcapi-reportsapi-0000001111685194"
+
+[[groups]]
+slug = "comments"
+title = "Comments API"
+reference = "https://developer.huawei.com/consumer/en/doc/development/AppGallery-connect-References/agcapi-commentapi-0000001115868340"
+
+[[groups]]
+slug = "pms"
+title = "PMS API"
+reference = "https://developer.huawei.com/consumer/en/doc/development/AppGallery-connect-References/agcapi-pmsapi-0000001162548121"
+
+[[groups]]
+slug = "project"
+title = "Project Management API"
+reference = "https://developer.huawei.com/consumer/en/doc/development/AppGallery-connect-References/agcapi-pmapi-0000001158245053"
+
+[[groups]]
+slug = "provisioning"
+title = "Provisioning API"
+reference = "https://developer.huawei.com/consumer/en/doc/app/agc-help-provision-api-reference-0000002236041494"
+
+# ---------------------------------------------------------------------------
+# Наборы инструментов (--toolsets) в порядке вывода. Каждая операция входит ровно в один
+# набор; вне наборов — только исключённые операции с `callable = false`.
+# ---------------------------------------------------------------------------
+
+[[toolsets]]
+slug = "apps"
+description = "Apps: find the app ID by package name, app details with localized listings, review comments and the phased release state."
+default = true
+operations = [
+    "publishing.appId.list",
+    "publishing.appInfo.get",
+]
+
+[[toolsets]]
+slug = "releases"
+description = "Releases: upload app packages and attach them to the app, package list and compilation status, submit the app for review, phased release, release time, GMS dependency flag."
+default = true
+operations = [
+    "publishing.fileInfo.update",
+    "publishing.package.list",
+    "publishing.packageCompileStatus.get",
+    "publishing.packageFile.submitByUrl",
+    "publishing.app.submit",
+    "publishing.app.submitWithFile",
+    "publishing.phasedRelease.update",
+    "publishing.releaseTime.update",
+    "publishing.gmsDependency.update",
+    "upload.uploadUrl.get",
+    "upload.file.put",
+    "upload.multipart.init",
+    "upload.multipart.parts",
+    "upload.chunk.put",
+    "upload.multipart.compose",
+]
+
+[[toolsets]]
+slug = "listing"
+description = "Store listing: basic app information (categories, privacy policy, price, release countries) and localized listings (name, descriptions, what is new)."
+operations = [
+    "publishing.appInfo.update",
+    "publishing.languageInfo.update",
+    "publishing.languageInfo.delete",
+]
+
+[[toolsets]]
+slug = "reviews"
+description = "User reviews: list and read reviews, ratings, reply to a review publicly."
+default = true
+operations = [
+    "comments.review.list",
+    "comments.review.get",
+    "comments.review.reply",
+    "comments.rating.list",
+]
+
+[[toolsets]]
+slug = "reports"
+description = "Reports: download and installation, in-app purchases, paid app and installation failure reports as CSV or Excel files."
+operations = [
+    "reports.downloadInstall.export",
+    "reports.iap.export",
+    "reports.paidApp.export",
+    "reports.paidAppDetails.export",
+    "reports.installFailure.export",
+]
+
+[[toolsets]]
+slug = "products"
+description = "In-app products and subscriptions (PMS API): products and their prices, subscription groups, promotions, activation and deactivation."
+operations = [
+    "pms.product.get",
+    "pms.product.search",
+    "pms.product.checkActive",
+    "pms.product.update",
+    "pms.product.batchUpdate",
+    "pms.product.batchActivate",
+    "pms.product.batchDeactivate",
+    "pms.productGroup.list",
+    "pms.productGroup.update",
+    "pms.promotion.get",
+    "pms.promotion.search",
+    "pms.promotion.create",
+    "pms.promotion.update",
+    "pms.promotion.batchActivate",
+    "pms.promotion.batchDeactivate",
+]
+
+[[toolsets]]
+slug = "projects"
+description = "Projects (Project Management API): teams, projects and their apps, brief app information, enabled services, the app configuration file, signing certificate fingerprints. The Huawei reference describes these operations only for OAuth clients and service accounts: with the API client of this server they may fail with a permission error."
+operations = [
+    "project.team.list",
+    "project.project.list",
+    "project.project.get",
+    "project.appBriefInfo.list",
+    "project.service.list",
+    "project.configFile.get",
+    "project.appExtraInfo.get",
+    "project.certFingerprint.add",
+]
+
+[[toolsets]]
+slug = "provisioning"
+description = "HarmonyOS signing (Provisioning API): signing certificates, debugging and testing devices, provisioning profiles."
+default = false
+operations = [
+    "provisioning.cert.list",
+    "provisioning.cert.create",
+    "provisioning.cert.delete",
+    "provisioning.device.list",
+    "provisioning.device.add",
+    "provisioning.device.delete",
+    "provisioning.profile.list",
+    "provisioning.profile.create",
+    "provisioning.profile.updateDevices",
+    "provisioning.profile.delete",
+]
+
+# ---------------------------------------------------------------------------
+# Имена инструментов: «глагол_ресурс», snake_case, не длиннее 40 символов. Имя задаётся
+# явно для каждой операции, которая не исключена.
+# ---------------------------------------------------------------------------
+
+[names]
+"publishing.appId.list" = "list_app_ids"
+"publishing.appInfo.get" = "get_app_info"
+"publishing.appInfo.update" = "update_app_info"
+"publishing.languageInfo.update" = "update_app_language_info"
+"publishing.languageInfo.delete" = "delete_app_language_info"
+"publishing.fileInfo.update" = "update_app_file_info"
+"publishing.app.submit" = "submit_app"
+"publishing.app.submitWithFile" = "submit_app_with_file"
+"publishing.phasedRelease.update" = "update_phased_release"
+"publishing.gmsDependency.update" = "update_gms_dependency"
+"publishing.releaseTime.update" = "update_release_time"
+"publishing.packageCompileStatus.get" = "get_package_compile_status"
+"publishing.packageFile.submitByUrl" = "submit_package_by_url"
+"publishing.package.list" = "list_packages"
+
+"reports.downloadInstall.export" = "get_download_report_url"
+"reports.iap.export" = "get_iap_report_url"
+"reports.paidApp.export" = "get_paid_app_report_url"
+"reports.paidAppDetails.export" = "get_paid_app_details_report_url"
+"reports.installFailure.export" = "get_install_failure_report_url"
+
+"project.team.list" = "list_teams"
+"project.appBriefInfo.list" = "list_app_brief_info"
+"project.configFile.get" = "get_app_config_file"
+"project.certFingerprint.add" = "add_cert_fingerprints"
+"project.appExtraInfo.get" = "get_app_fingerprints"
+"project.service.list" = "list_project_services"
+"project.project.get" = "get_project"
+"project.project.list" = "list_projects"
+
+"comments.review.list" = "list_reviews"
+"comments.review.get" = "get_review"
+"comments.review.reply" = "reply_review"
+"comments.rating.list" = "list_ratings"
+
+"pms.productGroup.update" = "update_product_group"
+"pms.productGroup.list" = "list_product_groups"
+"pms.product.get" = "get_product"
+"pms.product.search" = "search_products"
+"pms.product.update" = "update_product"
+"pms.product.batchUpdate" = "batch_update_products"
+"pms.product.batchActivate" = "activate_products"
+"pms.product.batchDeactivate" = "deactivate_products"
+"pms.product.checkActive" = "check_active_products"
+"pms.promotion.create" = "create_promotion"
+"pms.promotion.update" = "update_promotion"
+"pms.promotion.get" = "get_promotion"
+"pms.promotion.search" = "search_promotions"
+"pms.promotion.batchActivate" = "release_promotions"
+"pms.promotion.batchDeactivate" = "remove_promotions"
+
+"provisioning.cert.create" = "create_certificate"
+"provisioning.cert.list" = "list_certificates"
+"provisioning.cert.delete" = "delete_certificates"
+"provisioning.device.add" = "add_devices"
+"provisioning.device.list" = "list_devices"
+"provisioning.device.delete" = "delete_devices"
+"provisioning.profile.create" = "create_profile"
+"provisioning.profile.list" = "list_profiles"
+"provisioning.profile.updateDevices" = "update_profile_devices"
+"provisioning.profile.delete" = "delete_profile"
+
+# ---------------------------------------------------------------------------
+# Уровни доступа.
+#
+# По умолчанию уровень задаёт HTTP-метод: GET — чтение (read), DELETE — удаление
+# (destructive), остальное — запись (write). Здесь только исключения:
+#
+# - destructive: действия с последствиями для пользователей AppGallery и денег —
+#   отправка на проверку, поэтапный выпуск и время выпуска, публичные ответы на отзывы,
+#   товары и цены, акции, удаление сертификатов и устройств запросом POST;
+# - write: GET, который выдаёт право записи;
+# - read: POST, который только читает.
+#
+# Изменение данных приложения, локализаций и файлов до отправки на проверку остаётся
+# записью. reason попадает в описание инструмента.
+# ---------------------------------------------------------------------------
+
+[[access]]
+level = "destructive"
+reason = "sends the version for review; after approval it is released to AppGallery users."
+operations = ["publishing.app.submit", "publishing.app.submitWithFile"]
+
+[[access]]
+level = "destructive"
+reason = "changes which share of users gets the version, pauses the rollout or releases the version to everyone."
+operations = ["publishing.phasedRelease.update"]
+
+[[access]]
+level = "destructive"
+reason = "changes when the approved version is released to users, up to releasing it immediately."
+operations = ["publishing.releaseTime.update"]
+
+[[access]]
+level = "destructive"
+reason = "publishes a reply that all AppGallery users see."
+operations = ["comments.review.reply"]
+
+[[access]]
+level = "destructive"
+reason = "changes products and their prices: this affects what users pay."
+operations = ["pms.product.update", "pms.product.batchUpdate"]
+
+[[access]]
+level = "destructive"
+reason = "puts products on sale or takes them off sale for users."
+operations = ["pms.product.batchActivate", "pms.product.batchDeactivate"]
+
+[[access]]
+level = "destructive"
+reason = "creates or changes a free trial or a promotional price of a subscription."
+operations = ["pms.promotion.create", "pms.promotion.update"]
+
+[[access]]
+level = "destructive"
+reason = "starts or ends promotions for users."
+operations = ["pms.promotion.batchActivate", "pms.promotion.batchDeactivate"]
+
+[[access]]
+level = "destructive"
+reason = "deletes signing certificates with a POST request; this cannot be undone."
+operations = ["provisioning.cert.delete"]
+
+[[access]]
+level = "destructive"
+reason = "deletes registered devices with a POST request; this cannot be undone."
+operations = ["provisioning.device.delete"]
+
+[[access]]
+level = "write"
+reason = "issues one-time credentials for uploading a file to the app."
+operations = ["upload.uploadUrl.get"]
+
+[[access]]
+level = "read"
+reason = "the POST request only reads data."
+operations = [
+    "pms.productGroup.list",
+    "pms.product.search",
+    "pms.promotion.search",
+    "provisioning.cert.list",
+]
+
+# ---------------------------------------------------------------------------
+# Исключённые операции: не регистрируются как инструменты, но находятся поиском по
+# операциям. `callable = false` запрещает вызов и через `api_request` (по умолчанию
+# true). reason — почему операции нет среди инструментов, alternative — что вызвать
+# вместо неё.
+# ---------------------------------------------------------------------------
+
+[[exclude]]
+operations = ["auth.token.create"]
+callable = false
+reason = "Issues credentials. The server gets and refreshes the access token itself and never returns it."
+alternative = "No call is needed: the server authorizes every request with the API client of its profile."
+
+[[exclude]]
+operations = [
+    "upload.uploadUrl.get",
+    "upload.multipart.init",
+    "upload.multipart.parts",
+    "upload.multipart.compose",
+]
+callable = false
+reason = "Steps of a file upload; their responses consist of one-time upload URLs and authorization headers, which the server does not return, so they are not called through api_request either."
+alternative = "For an app package (APK, AAB, RPK, APP, EXE) use package_upload: it uploads the file, in chunks when it is large, and attaches it to the app itself. For the icon, screenshots and videos of the app page use image_sync."
+
+[[exclude]]
+operations = ["upload.file.put", "upload.chunk.put"]
+callable = false
+reason = "Not a Connect API call: the file content is sent to the storage URL from the upload URL response."
+alternative = "Use package_upload for an app package or image_sync for the icon, screenshots and videos: they send the file to the storage themselves."
+
+# ---------------------------------------------------------------------------
+# Поля ответов с секретами и временными ссылками. Сервер заменяет их значения на "***"
+# и пишет агенту пометку note: что скрыто, почему и как получить. kind:
+# - credential — учётные данные (секрет приложения): не отдаются никак;
+# - download-url — временная ссылка на файл: с аргументом save_to сервер сам скачивает
+#   файл (только с хостов Huawei) и отдаёт путь и размер;
+# - file-content — содержимое файла с учётными данными: с save_to сервер сохраняет его.
+# fields — пути в JSON ответа: имена через точку, [] — каждый элемент массива. Генератор
+# сверяет пути со схемой ответа снимка. description и hint — для агента, на английском.
+# ---------------------------------------------------------------------------
+
+[[secrets]]
+kind = "credential"
+description = "the app secret, a credential of the app"
+hint = "If the app needs it, the user can view it in the project settings of the app in AppGallery Connect; never ask them to paste it into the conversation."
+operations = ["project.appExtraInfo.get"]
+fields = ["secret"]
+
+[[secrets]]
+kind = "file-content"
+description = "the content of the app configuration file agconnect-services.json, which holds the app's credentials"
+hint = "Add the saved file to the app project; do not commit it to public repositories."
+operations = ["project.configFile.get"]
+fields = ["content"]
+
+[[secrets]]
+kind = "download-url"
+description = "a temporary link to the report file"
+hint = "The link is valid only for a short time: pass save_to in the same call."
+operations = [
+    "reports.downloadInstall.export",
+    "reports.iap.export",
+    "reports.paidApp.export",
+    "reports.paidAppDetails.export",
+    "reports.installFailure.export",
+]
+fields = ["fileURL"]
+
+[[secrets]]
+kind = "download-url"
+description = "a temporary link to the certificate file, valid for about five minutes"
+operations = ["provisioning.cert.create"]
+fields = ["certInfo.certDownloadUrl"]
+
+[[secrets]]
+kind = "download-url"
+description = "a temporary link to the certificate file, valid for about five minutes"
+hint = "save_to saves one file: narrow the list to one certificate with certIds in body."
+operations = ["provisioning.cert.list"]
+fields = ["certInfo[].certDownloadUrl", "certList[].certDownloadUrl"]
+
+[[secrets]]
+kind = "download-url"
+description = "a temporary link to the provisioning profile file"
+operations = ["provisioning.profile.create", "provisioning.profile.updateDevices"]
+fields = ["provisionInfo.provisionDownloadUrl"]
+
+[[secrets]]
+kind = "download-url"
+description = "a temporary link to the provisioning profile file"
+hint = "save_to saves one file: narrow the list to one profile with provisionId."
+operations = ["provisioning.profile.list"]
+fields = ["provisionList[].provisionDownloadUrl"]

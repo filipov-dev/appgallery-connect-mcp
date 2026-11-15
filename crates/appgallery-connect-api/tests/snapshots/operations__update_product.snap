@@ -1,0 +1,196 @@
+---
+source: crates/appgallery-connect-api/tests/operations.rs
+expression: "snapshot_view(op(\"update_product\"))"
+---
+{
+  "access": "destructive",
+  "body": "Json",
+  "description": "The product is addressed by resource.productNo. The product type and the subscription period cannot be changed. Only the prices listed in resource.prices are changed. For a subscription, force 1 applies the new price to existing subscribers. Price changes affect what users pay. The reference does not say whether a product that does not exist yet is created.\n\nDestructive: changes products and their prices: this affects what users pay.",
+  "group": "pms",
+  "input_schema": {
+    "additionalProperties": false,
+    "properties": {
+      "appId": {
+        "description": "App ID.",
+        "type": "string"
+      },
+      "body": {
+        "description": "Request body: JSON object.",
+        "properties": {
+          "requestId": {
+            "description": "Request sequence number, which is a unique identifier defined by you.",
+            "maxLength": 64,
+            "type": "string"
+          },
+          "resource": {
+            "description": "Product information.",
+            "properties": {
+              "appId": {
+                "description": "App ID.",
+                "type": "string"
+              },
+              "country": {
+                "description": "Default country/region code. Example: CN",
+                "type": "string"
+              },
+              "currency": {
+                "description": "Default currency used for payment. Example: USD, CNY, and MYR",
+                "type": "string"
+              },
+              "defaultLocale": {
+                "description": "Default language. Example: zh_CN and en_US",
+                "type": "string"
+              },
+              "defaultPrice": {
+                "description": "Default price (converted based on the exchange rate), in cents. If this parameter is set during product creation, this parameter is mandatory during a product update. For example, if the price is US$1.99, this parameter must be set to 199.",
+                "type": "string"
+              },
+              "force": {
+                "description": "Indicates whether to change the price by force for existing subscribers of a subscription product when the product price changes. The default value is 0. 0: no 1: yes",
+                "type": "integer"
+              },
+              "isNeedApprove": {
+                "description": "Indicates whether review is required. This parameter is reserved. N: no (default value) Y: yes",
+                "type": "string"
+              },
+              "languages": {
+                "description": "Localized information of a product. If no value is passed, the information will be constructed based on productName, productDesc, and defaultLocale.",
+                "items": {
+                  "properties": {
+                    "locale": {
+                      "description": "Product language. Example: zh_CN and en_US",
+                      "type": "string"
+                    },
+                    "productDesc": {
+                      "description": "Product description. The vertical bar (|) is not supported.",
+                      "maxLength": 100,
+                      "type": "string"
+                    },
+                    "productName": {
+                      "description": "Product name. The vertical bar (|) is not supported.",
+                      "maxLength": 55,
+                      "type": "string"
+                    }
+                  },
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              "prices": {
+                "description": "Custom prices. If this parameter passed, the defaultPrice field must be passed, too. In the update scenario, only prices listed in this parameter are updated. Prices for other countries/regions will not be automatically updated.",
+                "items": {
+                  "properties": {
+                    "country": {
+                      "description": "Country/Region code. Example: CN The default value is CN.",
+                      "type": "string"
+                    },
+                    "price": {
+                      "description": "Price, in cents. For example, if the price is US$1.99, this parameter must be set to 199.",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "country",
+                    "price"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              "productDesc": {
+                "description": "Default description of a product. The vertical bar (|) is not supported.",
+                "maxLength": 100,
+                "type": "string"
+              },
+              "productName": {
+                "description": "Product name, which can be localized in multiple languages. Set this parameter based on the setting of defaultLocale. The vertical bar (|) is not supported.",
+                "maxLength": 55,
+                "type": "string"
+              },
+              "productNo": {
+                "description": "Product ID chosen by the developer, unique within the app. Starts with a letter or digit; may contain letters, digits, underscores and periods. Cannot be changed.",
+                "maxLength": 148,
+                "type": "string"
+              },
+              "purchaseType": {
+                "description": "Product type. Options: consumable auto_subscription non_consumable The value cannot be changed during a product update.",
+                "type": "string"
+              },
+              "status": {
+                "description": "Product status. A product in either active or inactive state can be created. Options: active: released inactive: removed delete: deleted. Product creation and update APIs do not support this option.",
+                "type": "string"
+              },
+              "subGroupId": {
+                "description": "Subscription group ID. This parameter is mandatory when purchaseType is set to auto_subscription. The prerequisite for using this parameter is that a subscription group has been created by calling the API for creating a product subscription group. The value cannot be changed during a product update.",
+                "type": "string"
+              },
+              "subPeriod": {
+                "description": "Subscription period. This parameter is mandatory when purchaseType is set to auto_subscription. The value cannot be changed during a product update.",
+                "type": "integer"
+              },
+              "subPeriodUnit": {
+                "description": "Unit of the subscription period: W week, M month, Y year. Required for auto_subscription products. Cannot be changed.",
+                "type": "string"
+              }
+            },
+            "required": [
+              "productNo",
+              "appId",
+              "productName",
+              "purchaseType",
+              "status",
+              "currency",
+              "country",
+              "defaultLocale",
+              "productDesc"
+            ],
+            "type": "object"
+          }
+        },
+        "required": [
+          "requestId",
+          "resource"
+        ],
+        "type": "object"
+      }
+    },
+    "required": [
+      "appId",
+      "body"
+    ],
+    "type": "object"
+  },
+  "method": "PUT",
+  "operation_id": "pms.product.update",
+  "params": [
+    {
+      "api_name": "appId",
+      "description": "App ID.",
+      "location": "Header",
+      "name": "appId",
+      "repeated": false,
+      "required": true,
+      "value_type": "String"
+    },
+    {
+      "api_name": "body",
+      "description": "Request body: JSON object.",
+      "location": "Body",
+      "name": "body",
+      "repeated": false,
+      "required": true,
+      "value_type": "Object"
+    }
+  ],
+  "path": "/api/pms/product-price-service/v1/manage/product",
+  "reference": "https://developer.huawei.com/consumer/en/doc/development/AppGallery-connect-References/agcapi-updateproduct-0000001162548125",
+  "response": "Json",
+  "result": {
+    "code_field": "errorCode",
+    "field": "error",
+    "message_field": "errorMsg"
+  },
+  "summary": "Updates an in-app product: names, description, status and prices.",
+  "tool_name": "update_product",
+  "toolset": "products"
+}

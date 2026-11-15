@@ -1,0 +1,208 @@
+---
+source: crates/appgallery-connect-api/tests/operations.rs
+expression: "snapshot_view(op(\"list_reviews\"))"
+---
+{
+  "access": "read",
+  "body": null,
+  "description": "beginTime and endTime are timestamps in milliseconds, at most six months apart. countries is required, and one call can cover only countries and regions served by the same site. Reviews can be filtered by text, rating, app version, reply status and language. Paged with page and limit (up to 100).",
+  "group": "comments",
+  "input_schema": {
+    "additionalProperties": false,
+    "properties": {
+      "apkVersions": {
+        "description": "App version, for example, a.b.c, which is the version number displayed to users on AppGallery. If this parameter is not set, comments of all versions of the app are queried by default. To query comments of multiple specific app versions, separate them with commas (,).",
+        "type": "string"
+      },
+      "appId": {
+        "description": "App ID.",
+        "type": "string"
+      },
+      "auditStates": {
+        "description": "Deprecated. Review status. If this parameter is not set, comments in all review statuses are queried by default.",
+        "type": "string"
+      },
+      "beginTime": {
+        "description": "Query start timestamp. The value is the total number of milliseconds since 1970-01-01 08:00:00.",
+        "format": "int64",
+        "type": "integer"
+      },
+      "content": {
+        "description": "Keyword of the comment content. Fuzzy match is supported.",
+        "type": "string"
+      },
+      "countries": {
+        "description": "Country/Region code, for example, CN. Separate multiple country/region with commas (,). However, only countries/regions managed by the same site can be queried at a time. Ensure that you pass only the listed country/region codes.",
+        "type": "string"
+      },
+      "devReplyStates": {
+        "description": "Reply states to include, separated by commas: 0 not replied, 1 replied by the developer, 6 the user answered the developer reply, 3 the developer replied again. All states by default.",
+        "type": "string"
+      },
+      "endTime": {
+        "description": "Query end timestamp. The value is the total number of milliseconds since 1970-01-01 08:00:00. The interval between beginTime and endTime cannot exceed six months.",
+        "format": "int64",
+        "type": "integer"
+      },
+      "langs": {
+        "description": "Languages to include, separated by commas: an ISO 639-1 language code and a country or region code joined by an underscore, for example en_US. All languages by default.",
+        "type": "string"
+      },
+      "limit": {
+        "description": "Number of records on each page. The value cannot exceed 100. The default value is 20.",
+        "type": "integer"
+      },
+      "page": {
+        "description": "Requested page number. The default value is 1. For example, if page is set to 2 and limit is set to 20 during a query, 20 comments are displayed on each page and the second page is queried.",
+        "type": "integer"
+      },
+      "ratings": {
+        "description": "Ratings to include, from 1 to 5, separated by commas (for example 4,5). All ratings by default.",
+        "type": "string"
+      },
+      "sort": {
+        "description": "Sorting mode. The default value is 0. 0: by time 1: by rating in descending order 2: by rating",
+        "type": "integer"
+      }
+    },
+    "required": [
+      "appId",
+      "beginTime",
+      "endTime",
+      "countries"
+    ],
+    "type": "object"
+  },
+  "method": "GET",
+  "operation_id": "comments.review.list",
+  "params": [
+    {
+      "api_name": "appId",
+      "description": "App ID.",
+      "location": "Query",
+      "name": "appId",
+      "repeated": false,
+      "required": true,
+      "value_type": "String"
+    },
+    {
+      "api_name": "content",
+      "description": "Keyword of the comment content. Fuzzy match is supported.",
+      "location": "Query",
+      "name": "content",
+      "repeated": false,
+      "required": false,
+      "value_type": "String"
+    },
+    {
+      "api_name": "beginTime",
+      "description": "Query start timestamp. The value is the total number of milliseconds since 1970-01-01 08:00:00.",
+      "location": "Query",
+      "name": "beginTime",
+      "repeated": false,
+      "required": true,
+      "value_type": "Integer"
+    },
+    {
+      "api_name": "endTime",
+      "description": "Query end timestamp. The value is the total number of milliseconds since 1970-01-01 08:00:00. The interval between beginTime and endTime cannot exceed six months.",
+      "location": "Query",
+      "name": "endTime",
+      "repeated": false,
+      "required": true,
+      "value_type": "Integer"
+    },
+    {
+      "api_name": "countries",
+      "description": "Country/Region code, for example, CN. Separate multiple country/region with commas (,). However, only countries/regions managed by the same site can be queried at a time. Ensure that you pass only the listed country/region codes.",
+      "location": "Query",
+      "name": "countries",
+      "repeated": false,
+      "required": true,
+      "value_type": "String"
+    },
+    {
+      "api_name": "ratings",
+      "description": "Ratings to include, from 1 to 5, separated by commas (for example 4,5). All ratings by default.",
+      "location": "Query",
+      "name": "ratings",
+      "repeated": false,
+      "required": false,
+      "value_type": "String"
+    },
+    {
+      "api_name": "apkVersions",
+      "description": "App version, for example, a.b.c, which is the version number displayed to users on AppGallery. If this parameter is not set, comments of all versions of the app are queried by default. To query comments of multiple specific app versions, separate them with commas (,).",
+      "location": "Query",
+      "name": "apkVersions",
+      "repeated": false,
+      "required": false,
+      "value_type": "String"
+    },
+    {
+      "api_name": "auditStates",
+      "description": "Deprecated. Review status. If this parameter is not set, comments in all review statuses are queried by default.",
+      "location": "Query",
+      "name": "auditStates",
+      "repeated": false,
+      "required": false,
+      "value_type": "String"
+    },
+    {
+      "api_name": "devReplyStates",
+      "description": "Reply states to include, separated by commas: 0 not replied, 1 replied by the developer, 6 the user answered the developer reply, 3 the developer replied again. All states by default.",
+      "location": "Query",
+      "name": "devReplyStates",
+      "repeated": false,
+      "required": false,
+      "value_type": "String"
+    },
+    {
+      "api_name": "langs",
+      "description": "Languages to include, separated by commas: an ISO 639-1 language code and a country or region code joined by an underscore, for example en_US. All languages by default.",
+      "location": "Query",
+      "name": "langs",
+      "repeated": false,
+      "required": false,
+      "value_type": "String"
+    },
+    {
+      "api_name": "sort",
+      "description": "Sorting mode. The default value is 0. 0: by time 1: by rating in descending order 2: by rating",
+      "location": "Query",
+      "name": "sort",
+      "repeated": false,
+      "required": false,
+      "value_type": "Integer"
+    },
+    {
+      "api_name": "page",
+      "description": "Requested page number. The default value is 1. For example, if page is set to 2 and limit is set to 20 during a query, 20 comments are displayed on each page and the second page is queried.",
+      "location": "Query",
+      "name": "page",
+      "repeated": false,
+      "required": false,
+      "value_type": "Integer"
+    },
+    {
+      "api_name": "limit",
+      "description": "Number of records on each page. The value cannot exceed 100. The default value is 20.",
+      "location": "Query",
+      "name": "limit",
+      "repeated": false,
+      "required": false,
+      "value_type": "Integer"
+    }
+  ],
+  "path": "/api/reviews/v1/manage/dev/reviews",
+  "reference": "https://developer.huawei.com/consumer/en/doc/development/AppGallery-connect-References/agcapi-comapi-getreviews-0000001162468139",
+  "response": "Json",
+  "result": {
+    "code_field": "rtnCode",
+    "field": "ret",
+    "message_field": "rtnDesc"
+  },
+  "summary": "Lists user reviews of the app for a period.",
+  "tool_name": "list_reviews",
+  "toolset": "reviews"
+}
