@@ -61,7 +61,10 @@ pub fn check_operation_arguments(
         let property = properties.and_then(|p| p.get(param.name));
         match param.location {
             ParamLocation::Body => check_body(param, property, value)?,
-            ParamLocation::Path | ParamLocation::Query | ParamLocation::Header => {
+            ParamLocation::Path
+            | ParamLocation::Query
+            | ParamLocation::Header
+            | ParamLocation::Credential => {
                 check_param(param, property, value)?;
             }
         }
@@ -101,9 +104,10 @@ pub fn check_fixed_argument(
         .and_then(|p| p.get(name));
     match param.location {
         ParamLocation::Body => check_body(param, property, value),
-        ParamLocation::Path | ParamLocation::Query | ParamLocation::Header => {
-            check_param(param, property, value)
-        }
+        ParamLocation::Path
+        | ParamLocation::Query
+        | ParamLocation::Header
+        | ParamLocation::Credential => check_param(param, property, value),
     }
 }
 

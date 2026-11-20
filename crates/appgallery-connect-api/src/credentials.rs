@@ -37,9 +37,21 @@ pub enum CredentialsError {
          Connect > Users and permissions > API key > Connect API"
     )]
     InvalidCharacter(&'static str),
-    /// Запись хранилища не разбирается как учётные данные.
-    #[error("the stored value is not a pair of an API client ID and secret: {0}")]
+    /// Запись хранилища или файл учётных данных не разбирается.
+    #[error("not a usable API client credential: {0}")]
     Malformed(String),
+    /// Идентификатор проекта с недопустимыми символами.
+    #[error(
+        "the project ID may contain only A-Z, a-z, 0-9, `-` and `_`; copy it from AppGallery \
+         Connect > the project > Project settings > General information"
+    )]
+    InvalidProjectId,
+    /// Идентификатор приложения не из десятичных цифр.
+    #[error(
+        "the app ID may contain only digits; copy it from AppGallery Connect > My apps > the \
+         app > App information"
+    )]
+    InvalidAppId,
 }
 
 const CLIENT_ID: &str = "client ID";
@@ -199,13 +211,13 @@ impl ApiClientCredentials {
     pub fn from_stored_json(text: &str) -> Result<Self, CredentialsError> {
         if text.len() > MAX_STORED_BYTES {
             return Err(CredentialsError::Malformed(format!(
-                "it is larger than {MAX_STORED_BYTES} bytes"
+                "the stored value is larger than {MAX_STORED_BYTES} bytes"
             )));
         }
         let mut stored: Stored = serde_json::from_str(text.trim()).map_err(|err| {
             CredentialsError::Malformed(format!(
-                "it is not a JSON object with `client_id` and `client_secret` (line {}, \
-                 column {})",
+                "the stored value is not a JSON object with `client_id` and `client_secret` \
+                 (line {}, column {})",
                 err.line(),
                 err.column()
             ))

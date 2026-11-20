@@ -1,6 +1,8 @@
-"""Офлайн-тесты update_spec.py: разбор страниц, нормализация, сравнение списков страниц.
+"""Офлайн-тесты update_spec.py: разбор страниц, нормализация, сравнение списков страниц,
+повторы при сбоях портала и коды выхода.
 
-Сеть не нужна: страницы — небольшие выдуманные фрагменты HTML.
+Сеть не нужна: страницы — небольшие выдуманные фрагменты HTML, загрузка, пауза и часы
+подменяются.
 
     python3 -I -B -m unittest discover -s crates/appgallery-connect-api/spec -p 'test_*.py'
 """
@@ -8,13 +10,16 @@
 from __future__ import annotations
 
 import contextlib
+import email.message
 import importlib.util
 import io
 import json
 import sys
 import tempfile
 import unittest
+import urllib.error
 from pathlib import Path
+from unittest import mock
 
 SPEC_DIR = Path(__file__).resolve().parent
 
@@ -120,6 +125,19 @@ MODEL_PAGE = """<h1>ProductPriceInfo</h1><div id="body1">
 <tbody><tr><td>country</td><td>Yes</td><td>String</td><td>Country code.</td></tr>
 <tr><td>price</td><td>Yes</td><td>String</td><td>Price, in cents.</td></tr></tbody></table></div></div>"""
 
+CONFIRM_PAGE = page(
+    "API for Confirming the Purchase for the Order Service",
+    "POST",
+    "{rootUrl}/applications/v2/purchases/confirm</p><p>NOTE: The value of rootUrl varies depending on the site.",
+    '<div class="section"><h4>Request Header</h4>'
+    + table(("Content-Type", "Yes", "String", "application/json."), ("Authorization", "Yes", "String", "Token."))
+    + '</div><div class="section"><h4>Request Body</h4>'
+    + table(("purchaseToken", "Yes", "String", "Purchase token."), ("productId", "Yes", "String", "Product ID."))
+    + "</div>",
+    table(("responseCode", "Yes", "String", "Result code."), ("responseMessage", "No", "String", "Description.")),
+    '{\n "responseCode": "0"\n "responseMessage": "consume success"\n}',
+)
+
 UPLOAD_PAGE = page(
     "Uploading a File",
     "PUT",
@@ -127,6 +145,8 @@ UPLOAD_PAGE = page(
     '<div class="section"><h4>[h2]Header</h4>' + table(("x-amz-date", "Yes", "String", "Date.")) + "</div>",
     "<p>If the API returns the HTTP status code 200, the file is successfully uploaded.</p>",
 )
+
+CODES_PAGE = "<h1>Result Codes</h1><p>Codes of the App Linking REST API.</p>"
 
 
 class NormalizationTest(unittest.TestCase):
@@ -253,12 +273,45 @@ class PageTest(unittest.TestCase):
         )
         self.assertEqual(update_spec.split_url("https://{domain}/api/oauth2/v1/token"), ("/api/oauth2/v1/token", [], []))
         self.assertEqual(update_spec.split_url("URL returned by another API."), (None, [], []))
+        self.assertEqual(
+            update_spec.split_url("{rootUrl}/sub/applications/v2/purchases/get NOTE: site."),
+            ("/sub/applications/v2/purchases/get", [], []),
+        )
+
+    def test_iap_operation_with_root_url_and_root_envelope(self):
+        draft = update_spec.parse_page(CONFIRM_PAGE)
+        self.assertEqual((draft["method"], draft["path"]), ("POST", "/applications/v2/purchases/confirm"))
+        self.assertEqual(draft["parameters"]["path"], [])
+        self.assertEqual([item["name"] for item in draft["parameters"]["body"]], ["purchaseToken", "productId"])
+        # Пример ответа без запятой — не JSON: конверт находится по тексту.
+        self.assertEqual(
+            {key: draft["result"][key] for key in ("field", "codeField", "messageField", "source")},
+            {"field": "", "codeField": "responseCode", "messageField": "responseMessage", "source": "example-text"},
+        )
+        self.assertEqual(
+            update_spec.detect_envelope([], '{"responseCode": "0"}')["source"], "example"
+        )
+        self.assertEqual(
+            update_spec.detect_envelope([{"name": "responseCode"}], "")["field"], ""
+        )
 
     def test_envelope_from_broken_example(self):
         result = update_spec.detect_envelope([], '{"ret": {"code": 0, "msg": "success" } "list": [ ... ] }')
         self.assertEqual((result["field"], result["codeField"], result["source"]), ("ret", "code", "example-text"))
         self.assertIsNone(update_spec.detect_envelope([{"name": "fileURL"}], ""))
 
+
+# Каталог HMS Core: узел «Server» раздела In-App Purchases.
+IAP_TREE = [{"nodeName": "In-App Purchases", "children": [{"nodeName": "Server", "children": [
+    {"nodeName": "API for Confirming the Purchase for the Order Service", "relateDocument": "iap-1"}]}]}]
+# Каталог HarmonyOS: узлы «REST API» есть и у других Kit, корень — путь «IAP Kit / REST API».
+KIT_TREE = [
+    {"nodeName": "Push Kit", "children": [{"nodeName": "REST API", "children": [
+        {"nodeName": "Sending Messages", "relateDocument": "push-1"}]}]},
+    {"nodeName": "IAP Kit", "children": [{"nodeName": "REST API", "children": [
+        {"nodeName": "Overview", "relateDocument": "kit-1"}]}]},
+]
+KIT_PAGE = "<h1>Overview</h1><p>Site information.</p>"
 
 TREE = [
     {"nodeName": "Other Service", "children": [{"nodeName": "Overview", "relateDocument": "other-1"}]},
@@ -279,7 +332,32 @@ TREE = [
             {"nodeName": "Something New", "relateDocument": "new-1"},
         ],
     },
+    # Узел «REST API» есть в разных разделах: раздел задаётся путём.
+    {"nodeName": "Auth Service", "children": [{"nodeName": "REST API", "children": [
+        {"nodeName": "Registering a User", "relateDocument": "auth-1"},
+        {"nodeName": "Signing Out a User", "relateDocument": "auth-2"},
+        {"nodeName": "Result Codes", "relateDocument": "auth-3"},
+    ]}]},
+    {"nodeName": "Remote Configuration", "children": [{"nodeName": "Server", "children": [
+        {"nodeName": "REST API", "relateDocument": None, "children": [
+            {"nodeName": "Querying Configuration Information", "relateDocument": "rc-1"},
+            {"nodeName": "Data Models", "relateDocument": None,
+             "children": [{"nodeName": "ConfigItem", "relateDocument": "rc-2"}]},
+        ]},
+    ]}]},
+    # Раздел App Linking: узлы «Server» и «REST» есть и у других сервисов.
+    {"nodeName": "Cloud DB", "children": [
+        {"nodeName": "Server", "children": [
+            {"nodeName": "REST", "children": [{"nodeName": "Querying Data", "relateDocument": "cdb-1"}]}]}]},
+    {"nodeName": "App Linking", "children": [
+        {"nodeName": "Android", "relateDocument": "al-android",
+         "children": [{"nodeName": "AppLinking", "relateDocument": "al-sdk"}]},
+        {"nodeName": "Server", "relateDocument": "al-server", "children": [
+            {"nodeName": "REST", "relateDocument": "al-rest", "children": [
+                {"nodeName": "Result Codes", "relateDocument": "link-1"}]}]}]},
 ]
+# Страницы раздела Remote Configuration из TREE.
+RC_PAGES = {"rc-1": "<h1>Remote Configuration</h1><p>Overview.</p>", "rc-2": "<h1>ConfigItem</h1><p>Model.</p>"}
 
 
 class TreeTest(unittest.TestCase):
@@ -300,9 +378,32 @@ class TreeTest(unittest.TestCase):
         pages = update_spec.collect_pages(update_spec.SOURCES[1], nodes)
         self.assertEqual([(item.id, item.group) for item in pages], [("prov-0", "provisioning")])
 
-    def test_missing_root_is_portal_error(self):
-        with self.assertRaises(update_spec.PortalError):
+    def test_root_path_selects_the_section(self):
+        pages = update_spec.collect_pages(update_spec.SOURCES[2], TREE)
+        self.assertEqual([(item.id, item.group) for item in pages], [("rc-1", "remoteconfig"), ("rc-2", "remoteconfig")])
+        self.assertEqual(pages[1].path, ("Data Models", "ConfigItem"))
+        self.assertIsNone(update_spec.find_root(TREE, "Remote Configuration / Android / REST API"))
+        # Без пути выбирается узел с большим числом дочерних страниц — чужой раздел.
+        self.assertEqual(update_spec.find_root(TREE, "REST API")["children"][0]["relateDocument"], "auth-1")
+
+    def test_missing_root_is_reference_change(self):
+        with self.assertRaises(update_spec.ReferenceChanged):
             update_spec.collect_pages(update_spec.SOURCES[0], [{"nodeName": "Other"}])
+
+    def test_root_path_selects_nested_node(self):
+        source = next(item for item in update_spec.SOURCES if item.default_group == "applinking")
+        self.assertEqual(source.root, "App Linking / Server / REST")
+        pages = update_spec.collect_pages(source, TREE)
+        # Только страницы под «App Linking / Server / REST»: без SDK, без самого узла REST и
+        # без одноимённого узла Cloud DB.
+        self.assertEqual([(item.id, item.group, item.path) for item in pages],
+                         [("link-1", "applinking", ("Result Codes",))])
+        self.assertTrue(pages[0].url.endswith("/AppGallery-connect-References/link-1"))
+        broken = json.loads(json.dumps(TREE))
+        broken[-1]["children"][1]["nodeName"] = "Server SDK"
+        with self.assertRaises(update_spec.ReferenceChanged) as caught:
+            update_spec.collect_pages(source, broken)
+        self.assertIn("App Linking / Server / REST", str(caught.exception))
 
 
 def lock(*pages: tuple[str, str, str, str]) -> dict:
@@ -353,9 +454,14 @@ class CommandTest(unittest.TestCase):
         (self.dir / "tree.app.json").write_text(json.dumps({"value": {"catalogTreeList": [
             {"nodeName": "AppGallery Connect API", "children": [
                 {"nodeName": "Upload Management API Reference", "relateDocument": "upload-1"}]}]}}))
+        (self.dir / "tree.HMSCore-References.json").write_text(
+            json.dumps({"value": {"catalogTreeList": IAP_TREE}}))
+        (self.dir / "tree.harmonyos-references.json").write_text(
+            json.dumps({"value": {"catalogTreeList": KIT_TREE}}))
         for page_id, html in {"token-1": SUBMIT_PAGE, "pms-0": "<h1>PMS API</h1><p>Overview.</p>",
                               "pms-1": PRODUCT_PAGE, "pms-2": MODEL_PAGE, "new-1": REVIEWS_PAGE,
-                              "upload-1": UPLOAD_PAGE}.items():
+                              "upload-1": UPLOAD_PAGE, **RC_PAGES, "link-1": CODES_PAGE,
+                              "iap-1": CONFIRM_PAGE, "kit-1": KIT_PAGE}.items():
             self.write_page(page_id, html)
         self.lock_file = self.dir / "pages.lock.json"
 
@@ -378,7 +484,12 @@ class CommandTest(unittest.TestCase):
         self.assertEqual(code, 0)
         saved = json.loads(self.lock_file.read_text())
         self.assertEqual([item["id"] for item in saved["pages"]],
-                         ["token-1", "pms-0", "pms-1", "pms-2", "new-1", "upload-1"])
+                         ["token-1", "pms-0", "pms-1", "pms-2", "new-1", "upload-1", "rc-1", "rc-2", "link-1",
+                          "iap-1", "kit-1"])
+        self.assertEqual(saved["pages"][9]["group"], "orders")
+        self.assertEqual(saved["sources"][4]["catalog"], "HMSCore-References")
+        self.assertEqual(saved["pages"][10]["group"], "iapkit")
+        self.assertEqual(saved["sources"][5]["catalog"], "harmonyos-references")
         self.assertEqual(saved["pages"][2]["sha256"], update_spec.page_hash(PRODUCT_PAGE))
         code, out, _ = self.run_script("--check")
         self.assertEqual(code, 0)
@@ -394,7 +505,8 @@ class CommandTest(unittest.TestCase):
         self.write_tree(tree)
         self.write_page("new-2", "<h1>Brand New</h1>")
         code, out, _ = self.run_script("--check")
-        self.assertEqual(code, 1)
+        self.assertEqual(code, 3)
+        self.assertIn("Справочник изменился: изменено 1, новых 1, пропало 1", out)
         self.assertIn("Изменённые страницы (1):", out)
         self.assertIn("Querying Details of a Product", out)
         self.assertIn("Новые страницы (1):", out)
@@ -407,18 +519,34 @@ class CommandTest(unittest.TestCase):
         code, _, _ = self.run_script("--check")
         self.assertEqual(code, 0)
 
-    def test_unavailable_page_is_exit_code_2(self):
+    def test_missing_saved_page_is_exit_code_1(self):
         self.run_script("--lock")
         (self.dir / "pages" / "pms-2.json").unlink()
         code, _, err = self.run_script("--check")
-        self.assertEqual(code, 2)
-        self.assertIn("портал документации недоступен", err)
+        self.assertEqual(code, 1)
+        self.assertIn("pms-2.json", err)
 
-    def test_page_without_content_is_exit_code_2(self):
+    def test_saved_page_without_content_is_exit_code_1(self):
         (self.dir / "pages" / "pms-2.json").write_text(json.dumps({"code": 500, "value": None}))
-        code, _, _ = self.run_script("--lock")
-        self.assertEqual(code, 2)
+        code, _, err = self.run_script("--lock")
+        self.assertEqual(code, 1)
+        self.assertIn("value.content.content", err)
         self.assertFalse(self.lock_file.exists())
+
+    def test_missing_lock_is_exit_code_1(self):
+        code, _, _ = self.run_script("--check")
+        self.assertEqual(code, 1)
+
+    def test_missing_root_is_exit_code_3(self):
+        self.run_script("--lock")
+        self.write_tree([{"nodeName": "Renamed API", "children": TREE[0]["children"]}])
+        code, out, _ = self.run_script("--check")
+        self.assertEqual(code, 3)
+        self.assertIn("нет узла «Connect API»", out)
+
+    def test_bad_arguments_are_exit_code_2(self):
+        with contextlib.redirect_stderr(io.StringIO()):
+            self.assertEqual(update_spec.main(["--check", "--lock"]), 2)
 
     def test_draft(self):
         target = self.dir / "out"
@@ -430,11 +558,236 @@ class CommandTest(unittest.TestCase):
         self.assertEqual([(item["method"], item["path"], item["group"]) for item in draft["operations"]],
                          [("POST", "/api/publish/v2/app-submit", "auth"),
                           ("GET", "/api/pms/product-price-service/v1/manage/product", "pms"),
-                          ("GET", "/api/reviews/v1/manage/dev/reviews/{reviewId}", "other")])
+                          ("GET", "/api/reviews/v1/manage/dev/reviews/{reviewId}", "other"),
+                          ("POST", "/applications/v2/purchases/confirm", "orders")])
         self.assertEqual([item["title"] for item in draft["external"]], ["Uploading a File"])
         self.assertEqual([item["title"] for item in draft["models"]], ["ProductPriceInfo"])
-        self.assertEqual([item["id"] for item in draft["other"]], ["pms-0"])
+        self.assertEqual([item["id"] for item in draft["other"]], ["pms-0", "rc-1", "rc-2", "link-1", "kit-1"])
         self.assertTrue(draft["operations"][1]["reference"].endswith("/pms-1"))
+
+
+class FakeClock:
+    """Часы и пауза: `sleep` только сдвигает время и запоминает паузы."""
+
+    def __init__(self):
+        self.now = 1000.0
+        self.sleeps: list[float] = []
+
+    def monotonic(self):
+        return self.now
+
+    def sleep(self, seconds):
+        self.sleeps.append(seconds)
+        self.now += seconds
+
+
+class FakeResponse:
+    def __init__(self, data: bytes):
+        self._data = data
+
+    def read(self):
+        return self._data
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+
+def http_error(code: int, retry_after: str | None = None) -> urllib.error.HTTPError:
+    headers = email.message.Message()
+    if retry_after is not None:
+        headers["Retry-After"] = retry_after
+    return urllib.error.HTTPError("https://portal.test", code, "error", headers, io.BytesIO(b""))
+
+
+class FakePortal:
+    """Портал документации в памяти: дерево по catalogName, страницы по objectId.
+
+    `failures[key]` — список исключений или байтов, которые отдаются до настоящего ответа
+    (ключ — имя каталога или id страницы, `"*"` — для всех запросов).
+    """
+
+    def __init__(self, clock: FakeClock, trees: dict, pages: dict):
+        self.clock = clock
+        self.trees = trees
+        self.pages = pages
+        self.failures: dict[str, list] = {}
+        self.down = False
+        self.requests: list[str] = []
+        self.request_cost = 1.0
+
+    def urlopen(self, request, timeout):
+        self.clock.now += self.request_cost
+        payload = json.loads(request.data.decode("utf-8"))
+        key = payload.get("catalogName") or payload["objectId"]
+        self.requests.append(key)
+        if self.down:
+            raise urllib.error.URLError("Temporary failure in name resolution")
+        queue = self.failures.get(key) or self.failures.get("*") or []
+        if queue:
+            failure = queue.pop(0)
+            if isinstance(failure, BaseException):
+                raise failure
+            return FakeResponse(failure)
+        if "catalogName" in payload:
+            body = {"value": {"catalogTreeList": self.trees[key]}}
+        else:
+            body = {"value": {"title": key, "content": {"content": self.pages[key]}}}
+        return FakeResponse(json.dumps(body).encode("utf-8"))
+
+
+APP_TREE = [{"nodeName": "AppGallery Connect API", "children": [
+    {"nodeName": "Upload Management API Reference", "relateDocument": "upload-1"}]}]
+PAGES = {"token-1": SUBMIT_PAGE, "pms-0": "<h1>PMS API</h1><p>Overview.</p>", "pms-1": PRODUCT_PAGE,
+         "pms-2": MODEL_PAGE, "new-1": REVIEWS_PAGE, "upload-1": UPLOAD_PAGE, **RC_PAGES, "link-1": CODES_PAGE,
+         "iap-1": CONFIRM_PAGE, "kit-1": KIT_PAGE}
+
+
+class NetworkTest(unittest.TestCase):
+    """Загрузка из сети с подменённым urlopen: повторы, лимит времени, коды выхода."""
+
+    def setUp(self):
+        self.clock = FakeClock()
+        self.portal = FakePortal(
+            self.clock,
+            {"AppGallery-connect-References": json.loads(json.dumps(TREE)), "app": APP_TREE,
+             "HMSCore-References": IAP_TREE, "harmonyos-references": KIT_TREE},
+            dict(PAGES),
+        )
+        for name, value in (("_urlopen", self.portal.urlopen), ("_sleep", self.clock.sleep),
+                            ("_now", self.clock.monotonic)):
+            patcher = mock.patch.object(update_spec, name, value)
+            patcher.start()
+            self.addCleanup(patcher.stop)
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.lock_file = Path(self.tmp.name) / "pages.lock.json"
+
+    def post(self, key="pms-1", deadline=None):
+        return update_spec.post_json(update_spec.PAGE_URL, {"language": "en", "objectId": key},
+                                     deadline, update_spec._page_problem)
+
+    def run_script(self, *args):
+        out, err = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            code = update_spec.main([*args, "--lock-file", str(self.lock_file), "--quiet"])
+        return code, out.getvalue(), err.getvalue()
+
+    def pauses(self):
+        """Паузы повторов без коротких пауз между запросами."""
+        return [seconds for seconds in self.clock.sleeps if seconds >= 1]
+
+    def test_retry_after_server_error(self):
+        self.portal.failures["pms-1"] = [http_error(503), http_error(502)]
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            data = self.post()
+        self.assertEqual(data["value"]["title"], "pms-1")
+        self.assertEqual(self.clock.sleeps, [5, 15])
+        self.assertIn("HTTP 503; попытка 1 из 4, повтор через 5 с", err.getvalue())
+
+    def test_retry_after_header_is_respected_and_capped(self):
+        self.portal.failures["pms-1"] = [http_error(429, "20"), http_error(429, "3600")]
+        with contextlib.redirect_stderr(io.StringIO()):
+            self.post()
+        self.assertEqual(self.clock.sleeps, [20, 60])
+
+    def test_response_without_content_is_retried(self):
+        self.portal.failures["pms-1"] = [b'{"code": 500, "value": null}', b"<html>busy</html>",
+                                         b'{"value": "busy"}']
+        with contextlib.redirect_stderr(io.StringIO()):
+            data = self.post()
+        self.assertIn("content", data["value"])
+        self.assertEqual(len(self.portal.requests), 4)
+
+    def test_network_failure_after_all_attempts(self):
+        self.portal.down = True
+        with contextlib.redirect_stderr(io.StringIO()):
+            with self.assertRaises(update_spec.PortalError) as caught:
+                self.post()
+        self.assertEqual(self.clock.sleeps, [5, 15, 30])
+        self.assertEqual(len(self.portal.requests), 4)
+        self.assertIn("name resolution", str(caught.exception))
+        self.assertIn("попыток: 4", str(caught.exception))
+
+    def test_client_error_is_not_retried(self):
+        self.portal.failures["pms-1"] = [http_error(404)]
+        with self.assertRaises(update_spec.ScriptError):
+            self.post()
+        self.assertEqual(self.clock.sleeps, [])
+
+    def test_deadline_stops_retries(self):
+        self.portal.down = True
+        with contextlib.redirect_stderr(io.StringIO()):
+            with self.assertRaises(update_spec.PortalError) as caught:
+                self.post(deadline=self.clock.now + 10)
+        self.assertEqual(self.clock.sleeps, [5])
+        self.assertIn("лимита времени", str(caught.exception))
+
+    def test_check_clean(self):
+        self.assertEqual(self.run_script("--lock")[0], 0)
+        code, out, err = self.run_script("--check")
+        self.assertEqual(code, 0)
+        self.assertIn("не изменился", out)
+        self.assertIn("страниц: 11", err)
+        # Дерево каталога скачивается один раз за прогон, хотя разделов в нём два.
+        self.assertEqual(self.portal.requests.count("AppGallery-connect-References"), 2)
+
+    def test_check_survives_transient_failures(self):
+        self.run_script("--lock")
+        self.portal.failures["app"] = [urllib.error.URLError("timed out")]
+        self.portal.failures["pms-2"] = [http_error(500), TimeoutError("read timed out")]
+        code, _, err = self.run_script("--check")
+        self.assertEqual(code, 0)
+        self.assertEqual(err.count("повтор через"), 3)
+
+    def test_changed_page_is_exit_code_3_with_report(self):
+        self.run_script("--lock")
+        self.portal.pages["pms-1"] = PRODUCT_PAGE.replace("Country code.", "Country or region code.")
+        self.portal.trees["AppGallery-connect-References"][1]["children"].append(
+            {"nodeName": "Brand New", "relateDocument": "new-2"})
+        self.portal.pages["new-2"] = "<h1>Brand New</h1>"
+        self.portal.trees["app"] = [{"nodeName": "AppGallery Connect API", "children": []}]
+        code, out, _ = self.run_script("--check")
+        self.assertEqual(code, 3)
+        self.assertIn("Справочник изменился: изменено 1, новых 1, пропало 1", out)
+        self.assertIn("Пропавшие страницы (1):\n  [upload] Upload Management API Reference\n"
+                      "      https://developer.huawei.com/consumer/en/doc/app/upload-1", out)
+        self.assertIn("Изменённые страницы (1):\n  [pms] Querying Details of a Product\n"
+                      "      https://developer.huawei.com/consumer/en/doc/development/"
+                      "AppGallery-connect-References/pms-1", out)
+        self.assertIn("Новые страницы (1):\n  [other] Brand New\n", out)
+
+    def test_portal_down_is_exit_code_4(self):
+        self.run_script("--lock")
+        before = self.lock_file.read_text()
+        self.portal.down = True
+        code, out, err = self.run_script("--check")
+        self.assertEqual(code, 4)
+        self.assertEqual(out, "")
+        self.assertIn("портал документации недоступен", err)
+        self.assertIn("Это не изменение справочника", err)
+        # Портал недоступен с первого запроса: одна серия повторов, а не по серии на страницу.
+        self.assertEqual(self.pauses(), [5, 15, 30])
+        self.assertEqual(self.lock_file.read_text(), before)
+
+    def test_time_limit_is_exit_code_4(self):
+        self.run_script("--lock")
+        self.portal.request_cost = 30.0
+        self.portal.requests.clear()
+        code, _, err = self.run_script("--check", "--time-limit", "100")
+        self.assertEqual(code, 4)
+        self.assertIn("лимит времени", err)
+        # 10 запросов по 30 с в 100 с не помещаются: проверка останавливается на четвёртом.
+        self.assertEqual(len(self.portal.requests), 4)
+
+    def test_time_limit_zero_disables_limit(self):
+        self.run_script("--lock")
+        self.portal.request_cost = 600.0
+        code, _, _ = self.run_script("--check", "--time-limit", "0")
+        self.assertEqual(code, 0)
 
 
 if __name__ == "__main__":

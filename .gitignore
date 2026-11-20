@@ -55,3 +55,6 @@ agconnect-services*.json
 client_secret*.json
 credentials*.json
 /secrets/
+
+# Local HTTP mode files for compose.yaml (access token hashes)
+/tokens.toml

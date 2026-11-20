@@ -13,6 +13,23 @@
 //! читаются: если системное хранилище недоступно (Linux без Secret Service), операции
 //! завершаются ошибкой [`StoreError::Unavailable`] с подсказкой.
 //!
+//! API-клиенты уровня проекта ([`crate::project`]) — вторые учётные данные того же
+//! профиля: запись `<профиль>/project/<projectId>` того же сервиса, значение того же вида
+//! ([`project_account`], [`CredentialStore::get_project`]). Имя профиля не содержит `/`,
+//! поэтому запись проекта не совпадёт с записью другого профиля. Хранилище не умеет
+//! перечислять записи: список проектов профиля (без секретов) лежит в файле профилей.
+//!
+//! Вход пользователя (режим OAuth-клиента, [`crate::user_oauth`]) — отдельная запись
+//! `<профиль>/oauth` того же сервиса ([`oauth_account`], [`CredentialStore::get_oauth`]):
+//! JSON `{"type": "oauth", "client_id", "client_secret"?, "refresh_token", "scopes"}`.
+//! Профиль пользуется либо API-клиентом, либо входом пользователя (поле `type` файла
+//! профилей); `auth login` при смене способа удаляет запись прежнего.
+//!
+//! Секреты приложений ([`crate::app`]: подпись запросов HMS IAP) — третьи записи того же
+//! профиля: `<профиль>/app/<appId>` того же сервиса, значение того же вида (client ID и
+//! секрет приложения; [`app_account`], [`CredentialStore::get_app_secret`]). Список
+//! приложений с сохранённым секретом (без секретов) тоже лежит в файле профилей.
+//!
 //! Секреты, которые создают или получают сами инструменты сервера (не учётные данные
 //! профиля), лежат отдельно: сервис [`SECRETS_KEYRING_SERVICE`], записи
 //! `<профиль>/<имя>` ([`KeyringVault`]). Наружу их значения не отдаются.
@@ -22,7 +39,9 @@ use std::sync::{Mutex, MutexGuard};
 
 use zeroize::Zeroizing;
 
+use crate::app::AppCredentials;
 use crate::credentials::ApiClientCredentials;
+use crate::user_oauth::OAuthCredentials;
 
 /// Имя сервиса записей в Keychain / Credential Manager / Secret Service.
 pub const KEYRING_SERVICE: &str = "dev.filipov.appgallery-connect-mcp";
@@ -61,13 +80,112 @@ pub enum StoreError {
          store them again with `appgallery-connect-mcp auth login --profile {profile}`"
     )]
     Corrupted { profile: String },
+    #[error(
+        "no project-level API client of project `{project_id}` is stored for profile \
+         `{profile}`; store it with `appgallery-connect-mcp auth project add --profile {profile} \
+         --project-id {project_id}`"
+    )]
+    ProjectNotFound { profile: String, project_id: String },
+    #[error(
+        "the value stored for project `{project_id}` of profile `{profile}` is not a valid API \
+         client ID and secret; store it again with `appgallery-connect-mcp auth project add \
+         --profile {profile} --project-id {project_id}`"
+    )]
+    ProjectCorrupted { profile: String, project_id: String },
+    #[error(
+        "no user sign-in is stored for profile `{profile}`; sign in with \
+         `appgallery-connect-mcp auth login --oauth --profile {profile}`"
+    )]
+    OAuthNotFound { profile: String },
+    #[error(
+        "the user sign-in stored for profile `{profile}` is not valid; sign in again with \
+         `appgallery-connect-mcp auth login --oauth --profile {profile}`"
+    )]
+    OAuthCorrupted { profile: String },
+    #[error(
+        "no app secret of app `{app_id}` is stored for profile `{profile}`; store it with \
+         `appgallery-connect-mcp auth app-secret set --profile {profile} --app {app_id}`"
+    )]
+    AppSecretNotFound { profile: String, app_id: String },
+    #[error(
+        "the value stored for the app secret of app `{app_id}` of profile `{profile}` is not \
+         a valid client ID and secret; store it again with `appgallery-connect-mcp auth \
+         app-secret set --profile {profile} --app {app_id}`"
+    )]
+    AppSecretCorrupted { profile: String, app_id: String },
     #[error("the system keychain is not available: {0}")]
     Unavailable(String),
     #[error("system keychain error: {0}")]
     Backend(String),
 }
 
+/// Имя записи хранилища для API-клиента проекта `project_id` профиля `profile`.
+pub fn project_account(profile: &str, project_id: &str) -> String {
+    format!("{profile}/project/{project_id}")
+}
+
+/// Имя записи хранилища со входом пользователя профиля `profile`.
+pub fn oauth_account(profile: &str) -> String {
+    format!("{profile}/oauth")
+}
+
+impl StoreError {
+    /// Ошибка записи входа пользователя: называет `auth login --oauth`.
+    fn for_oauth(self, profile: &str) -> Self {
+        match self {
+            Self::NotFound { .. } => Self::OAuthNotFound {
+                profile: profile.to_owned(),
+            },
+            Self::Corrupted { .. } => Self::OAuthCorrupted {
+                profile: profile.to_owned(),
+            },
+            other => other,
+        }
+    }
+}
+
+/// Имя записи хранилища для секрета приложения `app_id` профиля `profile`.
+pub fn app_account(profile: &str, app_id: &str) -> String {
+    format!("{profile}/app/{app_id}")
+}
+
+impl StoreError {
+    /// Ошибка записи секрета приложения: называет приложение и `auth app-secret set`.
+    fn for_app(self, profile: &str, app_id: &str) -> Self {
+        match self {
+            Self::NotFound { .. } => Self::AppSecretNotFound {
+                profile: profile.to_owned(),
+                app_id: app_id.to_owned(),
+            },
+            Self::Corrupted { .. } => Self::AppSecretCorrupted {
+                profile: profile.to_owned(),
+                app_id: app_id.to_owned(),
+            },
+            other => other,
+        }
+    }
+
+    /// Ошибка записи проекта: «нет записи» и «запись испорчена» называют проект и команду
+    /// `auth project add`, а не `auth login`.
+    fn for_project(self, profile: &str, project_id: &str) -> Self {
+        match self {
+            Self::NotFound { .. } => Self::ProjectNotFound {
+                profile: profile.to_owned(),
+                project_id: project_id.to_owned(),
+            },
+            Self::Corrupted { .. } => Self::ProjectCorrupted {
+                profile: profile.to_owned(),
+                project_id: project_id.to_owned(),
+            },
+            other => other,
+        }
+    }
+}
+
 /// Хранилище учётных данных API-клиентов по имени профиля.
+///
+/// Методы `*_project` работают с записями клиентов проектов ([`project_account`]) через
+/// основные методы; реализации их не переопределяют.
 pub trait CredentialStore: Send + Sync {
     /// Учётные данные профиля.
     fn get(&self, profile: &str) -> Result<ApiClientCredentials, StoreError>;
@@ -90,6 +208,79 @@ pub trait CredentialStore: Send + Sync {
             Err(StoreError::NotFound { .. }) => Ok(false),
             Err(err) => Err(err),
         }
+    }
+
+    /// Учётные данные API-клиента проекта `project_id` профиля.
+    fn get_project(
+        &self,
+        profile: &str,
+        project_id: &str,
+    ) -> Result<ApiClientCredentials, StoreError> {
+        self.get(&project_account(profile, project_id))
+            .map_err(|err| err.for_project(profile, project_id))
+    }
+
+    /// Сохраняет API-клиент проекта, заменяя прежний.
+    fn set_project(
+        &self,
+        profile: &str,
+        project_id: &str,
+        credentials: &ApiClientCredentials,
+    ) -> Result<(), StoreError> {
+        self.set(&project_account(profile, project_id), credentials)
+            .map_err(|err| err.for_project(profile, project_id))
+    }
+
+    /// Удаляет API-клиент проекта; если записи нет — [`StoreError::ProjectNotFound`].
+    fn delete_project(&self, profile: &str, project_id: &str) -> Result<(), StoreError> {
+        self.delete(&project_account(profile, project_id))
+            .map_err(|err| err.for_project(profile, project_id))
+    }
+
+    /// Вход пользователя профиля (запись [`oauth_account`]).
+    fn get_oauth(&self, profile: &str) -> Result<OAuthCredentials, StoreError>;
+
+    /// Сохраняет вход пользователя профиля, заменяя прежний.
+    fn set_oauth(&self, profile: &str, credentials: &OAuthCredentials) -> Result<(), StoreError>;
+
+    /// Удаляет вход пользователя; если записи нет — [`StoreError::OAuthNotFound`].
+    fn delete_oauth(&self, profile: &str) -> Result<(), StoreError>;
+
+    /// Есть ли вход пользователя у профиля (испорченная запись тоже считается).
+    fn contains_oauth(&self, profile: &str) -> Result<bool, StoreError> {
+        match self.get_oauth(profile) {
+            Ok(_) | Err(StoreError::OAuthCorrupted { .. }) => Ok(true),
+            Err(StoreError::OAuthNotFound { .. }) => Ok(false),
+            Err(err) => Err(err),
+        }
+    }
+
+    /// Секрет приложения `app_id` профиля.
+    fn get_app_secret(&self, profile: &str, app_id: &str) -> Result<AppCredentials, StoreError> {
+        let stored = self
+            .get(&app_account(profile, app_id))
+            .map_err(|err| err.for_app(profile, app_id))?;
+        AppCredentials::from_stored(app_id, stored).map_err(|_| StoreError::AppSecretCorrupted {
+            profile: profile.to_owned(),
+            app_id: app_id.to_owned(),
+        })
+    }
+
+    /// Сохраняет секрет приложения, заменяя прежний.
+    fn set_app_secret(
+        &self,
+        profile: &str,
+        credentials: &AppCredentials,
+    ) -> Result<(), StoreError> {
+        let app_id = credentials.app_id();
+        self.set(&app_account(profile, app_id), credentials.stored())
+            .map_err(|err| err.for_app(profile, app_id))
+    }
+
+    /// Удаляет секрет приложения; если записи нет — [`StoreError::AppSecretNotFound`].
+    fn delete_app_secret(&self, profile: &str, app_id: &str) -> Result<(), StoreError> {
+        self.delete(&app_account(profile, app_id))
+            .map_err(|err| err.for_app(profile, app_id))
     }
 }
 
@@ -156,6 +347,35 @@ impl CredentialStore for KeyringStore {
         Self::entry(profile)?
             .delete_credential()
             .map_err(|err| map_error(profile, err))
+    }
+
+    fn get_oauth(&self, profile: &str) -> Result<OAuthCredentials, StoreError> {
+        let account = oauth_account(profile);
+        let bytes = Zeroizing::new(
+            Self::entry(&account)?
+                .get_secret()
+                .map_err(|err| map_error(&account, err).for_oauth(profile))?,
+        );
+        let corrupted = || StoreError::OAuthCorrupted {
+            profile: profile.to_owned(),
+        };
+        let text = std::str::from_utf8(&bytes).map_err(|_| corrupted())?;
+        OAuthCredentials::from_stored_json(text).map_err(|_| corrupted())
+    }
+
+    fn set_oauth(&self, profile: &str, credentials: &OAuthCredentials) -> Result<(), StoreError> {
+        let account = oauth_account(profile);
+        let json = credentials.to_stored_json();
+        Self::entry(&account)?
+            .set_secret(json.as_bytes())
+            .map_err(|err| map_error(&account, err).for_oauth(profile))
+    }
+
+    fn delete_oauth(&self, profile: &str) -> Result<(), StoreError> {
+        let account = oauth_account(profile);
+        Self::entry(&account)?
+            .delete_credential()
+            .map_err(|err| map_error(&account, err).for_oauth(profile))
     }
 
     fn check_available(&self) -> Result<(), StoreError> {
@@ -230,6 +450,7 @@ impl KeyringVault {
 #[derive(Debug, Default)]
 pub struct MemoryStore {
     entries: Mutex<HashMap<String, ApiClientCredentials>>,
+    oauth: Mutex<HashMap<String, OAuthCredentials>>,
 }
 
 impl MemoryStore {
@@ -239,6 +460,12 @@ impl MemoryStore {
 
     fn lock(&self) -> Result<MutexGuard<'_, HashMap<String, ApiClientCredentials>>, StoreError> {
         self.entries
+            .lock()
+            .map_err(|_| StoreError::Backend("the in-memory credential store is poisoned".into()))
+    }
+
+    fn lock_oauth(&self) -> Result<MutexGuard<'_, HashMap<String, OAuthCredentials>>, StoreError> {
+        self.oauth
             .lock()
             .map_err(|_| StoreError::Backend("the in-memory credential store is poisoned".into()))
     }
@@ -270,6 +497,30 @@ impl CredentialStore for MemoryStore {
 
     fn check_available(&self) -> Result<(), StoreError> {
         self.lock().map(|_| ())
+    }
+
+    fn get_oauth(&self, profile: &str) -> Result<OAuthCredentials, StoreError> {
+        self.lock_oauth()?
+            .get(profile)
+            .cloned()
+            .ok_or_else(|| StoreError::OAuthNotFound {
+                profile: profile.to_owned(),
+            })
+    }
+
+    fn set_oauth(&self, profile: &str, credentials: &OAuthCredentials) -> Result<(), StoreError> {
+        self.lock_oauth()?
+            .insert(profile.to_owned(), credentials.clone());
+        Ok(())
+    }
+
+    fn delete_oauth(&self, profile: &str) -> Result<(), StoreError> {
+        self.lock_oauth()?
+            .remove(profile)
+            .map(|_| ())
+            .ok_or_else(|| StoreError::OAuthNotFound {
+                profile: profile.to_owned(),
+            })
     }
 }
 
@@ -313,6 +564,91 @@ mod tests {
             Err(StoreError::NotFound { .. })
         ));
         assert_eq!(store.get("other").unwrap(), two);
+    }
+
+    #[test]
+    fn project_entries_are_separate_from_profiles() {
+        let store = MemoryStore::new();
+        let (team, project) = (credentials("5"), credentials("6"));
+        store.set("work", &team).unwrap();
+        let err = store.get_project("work", "100").unwrap_err();
+        assert!(matches!(err, StoreError::ProjectNotFound { .. }), "{err:?}");
+        let text = err.to_string();
+        assert!(
+            text.contains("auth project add --profile work --project-id 100"),
+            "{text}"
+        );
+        store.set_project("work", "100", &project).unwrap();
+        assert_eq!(project_account("work", "100"), "work/project/100");
+        assert_eq!(store.get_project("work", "100").unwrap(), project);
+        assert_eq!(store.get("work").unwrap(), team);
+        assert!(store.get_project("other", "100").is_err());
+        store.delete("work").unwrap();
+        assert_eq!(store.get_project("work", "100").unwrap(), project);
+        store.delete_project("work", "100").unwrap();
+        assert!(matches!(
+            store.delete_project("work", "100"),
+            Err(StoreError::ProjectNotFound { .. })
+        ));
+    }
+
+    #[test]
+    fn oauth_entries_are_separate_from_api_clients() {
+        use crate::credentials::ClientId;
+        use crate::user_oauth::{OAuthClient, OAuthCredentials};
+        let store = MemoryStore::new();
+        let sign_in = OAuthCredentials::new(
+            OAuthClient::new(ClientId::new("1088").unwrap(), None),
+            &["Rt", "-", "7"].concat().repeat(4),
+            vec!["openid".into()],
+        )
+        .unwrap();
+        store.set("work", &credentials("7")).unwrap();
+        let err = store.get_oauth("work").unwrap_err();
+        assert!(matches!(err, StoreError::OAuthNotFound { .. }), "{err:?}");
+        assert!(
+            err.to_string()
+                .contains("auth login --oauth --profile work")
+        );
+        assert!(!store.contains_oauth("work").unwrap());
+        store.set_oauth("work", &sign_in).unwrap();
+        assert!(store.contains_oauth("work").unwrap());
+        assert_eq!(store.get_oauth("work").unwrap(), sign_in);
+        assert_eq!(oauth_account("work"), "work/oauth");
+        store.delete("work").unwrap();
+        assert_eq!(store.get_oauth("work").unwrap(), sign_in);
+        store.delete_oauth("work").unwrap();
+        assert!(matches!(
+            store.delete_oauth("work"),
+            Err(StoreError::OAuthNotFound { .. })
+        ));
+    }
+
+    #[test]
+    fn app_secret_entries_are_separate() {
+        let store = MemoryStore::new();
+        let secret = ["a1b2", "c3d4"].concat().repeat(8);
+        let app = AppCredentials::new("100000001", None, secret).unwrap();
+        let err = store.get_app_secret("work", "100000001").unwrap_err();
+        assert!(
+            matches!(err, StoreError::AppSecretNotFound { .. }),
+            "{err:?}"
+        );
+        assert!(
+            err.to_string()
+                .contains("auth app-secret set --profile work --app 100000001"),
+            "{err}"
+        );
+        store.set_app_secret("work", &app).unwrap();
+        assert_eq!(app_account("work", "100000001"), "work/app/100000001");
+        assert_eq!(store.get_app_secret("work", "100000001").unwrap(), app);
+        assert!(store.get("work").is_err());
+        assert!(store.get_project("work", "100000001").is_err());
+        store.delete_app_secret("work", "100000001").unwrap();
+        assert!(matches!(
+            store.delete_app_secret("work", "100000001"),
+            Err(StoreError::AppSecretNotFound { .. })
+        ));
     }
 
     #[test]

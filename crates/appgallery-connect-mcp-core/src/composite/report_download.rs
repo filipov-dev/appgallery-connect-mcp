@@ -1244,6 +1244,7 @@ mod tests {
                 packages: Vec::new(),
             },
             access: AccessLevel::Read,
+            http: false,
         }
     }
 

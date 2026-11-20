@@ -4,6 +4,9 @@ expression: "snapshot_view(op(\"list_reviews\"))"
 ---
 {
   "access": "read",
+  "auth_modes": [
+    "api-client"
+  ],
   "body": null,
   "description": "beginTime and endTime are timestamps in milliseconds, at most six months apart. countries is required, and one call can cover only countries and regions served by the same site. Reviews can be filtered by text, rating, app version, reply status and language. Paged with page and limit (up to 100).",
   "group": "comments",

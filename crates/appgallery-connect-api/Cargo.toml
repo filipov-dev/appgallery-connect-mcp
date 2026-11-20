@@ -8,8 +8,13 @@ repository.workspace = true
 rust-version.workspace = true
 
 [dependencies]
+# PKCE входа пользователя: `code_verifier` в base64url и `code_challenge` (SHA-256);
+# заголовок `Authorization: Basic base64("APPAT:" + token)` запросов HMS IAP.
+base64 = "0.22.1"
 # Поток файла с ограничением длины для загрузки частями.
 futures-util = { version = "0.3.34", default-features = false }
+# Случайные `state` и `code_verifier` входа пользователя.
+getrandom = "0.4.3"
 # Secret Service в Linux — через zbus (чистый Rust, рантайм async-io, шифрование
 # сессии на Rust): бинарник не линкуется с libdbus и OpenSSL и собирается статически
 # (musl). async-io крутит D-Bus в своём потоке, поэтому синхронный API keyring
@@ -20,6 +25,7 @@ percent-encoding = "2.3.2"
 reqwest = { version = "0.13.5", default-features = false, features = ["rustls", "json", "stream", "http2"] }
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.154"
+sha2 = "0.11.1"
 thiserror = "2.0.21"
 tokio = { version = "1.54.1", features = ["fs", "io-util", "sync", "time"] }
 tracing = "0.1.44"

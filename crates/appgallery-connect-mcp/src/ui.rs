@@ -17,6 +17,8 @@ pub trait Ui {
     fn confirm(&mut self, question: &str, default: bool) -> io::Result<bool>;
     /// Можно ли задавать вопросы: stdin — терминал. В CI и скриптах вопросов нет.
     fn is_interactive(&self) -> bool;
+    /// Открывает ссылку в браузере по умолчанию (вход пользователя).
+    fn open_url(&mut self, url: &str) -> io::Result<()>;
 }
 
 /// Разбирает ответ на вопрос «да/нет». `None` — ответ не распознан.
@@ -77,6 +79,10 @@ impl Ui for TerminalUi {
     fn is_interactive(&self) -> bool {
         io::stdin().is_terminal()
     }
+
+    fn open_url(&mut self, url: &str) -> io::Result<()> {
+        crate::browser::open_in_browser(url)
+    }
 }
 
 /// Тихий режим (`connect --silent`): ничего не выводит и ничего не спрашивает. Команда ведёт
@@ -111,6 +117,13 @@ impl Ui for SilentUi {
     fn is_interactive(&self) -> bool {
         false
     }
+
+    fn open_url(&mut self, _url: &str) -> io::Result<()> {
+        Err(io::Error::new(
+            io::ErrorKind::Unsupported,
+            "--silent: the browser is not opened",
+        ))
+    }
 }
 
 #[cfg(test)]
@@ -130,6 +143,10 @@ pub mod testing {
         pub questions: Vec<String>,
         /// Сценарий изображает терминал: можно задавать вопросы.
         pub interactive: bool,
+        /// Ссылки, которые открыл бы браузер.
+        pub opened: Vec<String>,
+        /// Браузер не открывается.
+        pub open_fails: bool,
     }
 
     impl ScriptedUi {
@@ -178,6 +195,14 @@ pub mod testing {
         fn is_interactive(&self) -> bool {
             self.interactive
         }
+
+        fn open_url(&mut self, url: &str) -> io::Result<()> {
+            if self.open_fails {
+                return Err(io::Error::new(io::ErrorKind::NotFound, "no browser"));
+            }
+            self.opened.push(url.to_owned());
+            Ok(())
+        }
     }
 }
 
@@ -193,6 +218,7 @@ mod tests {
         assert!(ui.ask("id?").is_err());
         assert!(ui.ask_secret("secret?").is_err());
         assert!(ui.confirm("ok?", true).is_err());
+        assert!(ui.open_url("https://example.com").is_err());
     }
 
     #[test]

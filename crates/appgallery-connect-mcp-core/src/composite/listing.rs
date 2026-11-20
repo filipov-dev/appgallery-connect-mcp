@@ -518,6 +518,7 @@ pub(crate) mod testing {
                 packages: Vec::new(),
             },
             access,
+            http: false,
         }
     }
 

@@ -2,7 +2,7 @@
 # Installer for appgallery-connect-mcp (Linux and macOS).
 #
 #   curl -fsSL https://codeload.sourcecraft.tech/filipov-dev/appgallery-connect-mcp/tarball/refs/heads/install | tar -xzO | sh
-#   ... | tar -xzO | sh -s -- --version v0.1.0 --prefix "$HOME/.local"
+#   ... | tar -xzO | sh -s -- --version v0.2.0 --prefix "$HOME/.local"
 #
 # Downloads the release archive for this OS and CPU, verifies it against the
 # release SHA256SUMS, and installs the `appgallery-connect-mcp` binary into
@@ -40,7 +40,7 @@ Options:
   -h, --help          Show this help.
 
 With curl:
-  curl -fsSL $INSTALLER_URL | tar -xzO | sh -s -- --version v0.1.0
+  curl -fsSL $INSTALLER_URL | tar -xzO | sh -s -- --version v0.2.0
 EOF
 }
 
@@ -58,7 +58,7 @@ main() {
   while [ $# -gt 0 ]; do
     case "$1" in
       --version)
-        [ $# -ge 2 ] || err "--version needs a value, for example --version v0.1.0"
+        [ $# -ge 2 ] || err "--version needs a value, for example --version v0.2.0"
         VERSION="$2"; shift 2 ;;
       --version=*) VERSION="${1#*=}"; shift ;;
       --prefix)

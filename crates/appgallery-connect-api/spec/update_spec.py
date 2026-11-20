@@ -2,7 +2,7 @@
 """Сверка снимка AppGallery Connect API со справочником Huawei.
 
 У Huawei нет машинной спецификации Connect API: снимок `openapi.json` ведётся вручную
-по страницам справочника. Скрипт не правит снимок, а помогает его вести:
+по страницам справочника (Connect API и серверные API HMS In-App Purchases). Скрипт не правит снимок, а помогает его вести:
 
     update_spec.py --check            сравнить страницы справочника с pages.lock.json
     update_spec.py --lock             записать pages.lock.json по текущим страницам
@@ -12,9 +12,15 @@
 `--from-dir DIR` читает дерево и страницы из каталога, заполненного `--draft`, вместо
 сети (для `--lock` сразу после `--draft` и для отладки разбора).
 
-Коды выхода: 0 — расхождений нет (или файл записан), 1 — `--check` нашёл расхождения,
-2 — портал недоступен (сеть, таймаут, ошибка портала после повторов) или неверные
-аргументы.
+Коды выхода:
+
+    0  расхождений нет (или файл записан);
+    1  другая ошибка: не читается pages.lock.json или каталог --from-dir, портал ответил
+       4xx (изменился сам портал, повтор не поможет);
+    2  неверные аргументы;
+    3  `--check` нашёл расхождения: справочник изменился;
+    4  портал недоступен после повторов (сеть, таймаут, 408, 429, 5xx, ответ без
+       содержимого) или вышел общий лимит времени: справочник не сверен, повтори позже.
 
 Только стандартная библиотека, Python 3.10+.
 """
@@ -23,7 +29,9 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import http.client
 import json
+import math
 import re
 import sys
 import time
@@ -43,12 +51,26 @@ PAGE_URL = f"{PORTAL}/getDocumentById"
 LANGUAGE = "en"
 TIMEOUT_SECONDS = 45
 ATTEMPTS = 4
+# Паузы перед второй, третьей и четвёртой попытками.
+RETRY_DELAYS = (5, 15, 30)
+# Больше этого Retry-After не ждём: лимит времени важнее.
+RETRY_AFTER_MAX = 60
 PAUSE_SECONDS = 0.4
+# Общий лимит времени на скачивание дерева и страниц (секунды). Обычный проход — пара
+# минут; лимит не даёт прогону CI занимать раннер, пока портал отвечает через раз.
+TIME_LIMIT_SECONDS = 900
 USER_AGENT = "appgallery-connect-spec-check/1"
 
 EXIT_OK = 0
-EXIT_CHANGED = 1
-EXIT_UNAVAILABLE = 2
+EXIT_ERROR = 1
+EXIT_USAGE = 2
+EXIT_CHANGED = 3
+EXIT_UNAVAILABLE = 4
+
+# Точки подмены для офлайн-тестов: сеть, пауза и часы.
+_urlopen = urllib.request.urlopen
+_sleep = time.sleep
+_now = time.monotonic
 
 
 @dataclass(frozen=True)
@@ -59,6 +81,8 @@ class Source:
     # Любая страница каталога: портал отдаёт дерево только по ней.
     anchor: str
     # Имя корневого узла; если таких несколько, берётся узел с дочерними страницами.
+    # Путь через « / » («Remote Configuration / Server / REST API») — узел с этими
+    # именами предков, если имя узла не уникально в каталоге.
     root: str
     # Адрес страницы на сайте: к нему дописывается id страницы.
     page_url: str
@@ -100,6 +124,60 @@ SOURCES: tuple[Source, ...] = (
         ),
         default_group="guide",
     ),
+    # Серверный REST API Remote Configuration: тот же каталог, свой раздел. Операции и
+    # модели (Data Models), коды результата — всё в группе remoteconfig.
+    Source(
+        catalog="AppGallery-connect-References",
+        anchor="agcapi-app-submit-0000001158245061",
+        root="Remote Configuration / Server / REST API",
+        page_url="https://developer.huawei.com/consumer/en/doc/development/AppGallery-connect-References/",
+        groups=(),
+        default_group="remoteconfig",
+    ),
+    # Серверный REST API App Linking (сервис проекта: нужен API-клиент проекта): две
+    # операции и коды результата, всё в группе applinking.
+    Source(
+        catalog="AppGallery-connect-References",
+        anchor="agcapi-app-submit-0000001158245061",
+        root="App Linking / Server / REST",
+        page_url="https://developer.huawei.com/consumer/en/doc/development/AppGallery-connect-References/",
+        groups=(),
+        default_group="applinking",
+    ),
+    # Серверные API HMS In-App Purchases (сервисы заказов и подписок): каталог HMS Core,
+    # узел «Server» раздела In-App Purchases. Узлы первого уровня — страницы операций.
+    Source(
+        catalog="HMSCore-References",
+        anchor="api-common-statement-0000001050986127",
+        root="Server",
+        page_url="https://developer.huawei.com/consumer/en/doc/development/HMSCore-References/",
+        groups=(
+            ("API for Obtaining an App-Level Access Token", "iap-auth"),
+            ("API for Verifying the Purchase Token for the Order Service", "orders"),
+            ("API for Confirming the Purchase for the Order Service", "orders"),
+            ("API for Querying", "orders"),
+            ("API for Verifying the Purchase Token for the Subscription Service", "subscriptions"),
+            ("API for Canceling a Subscription", "subscriptions"),
+            ("API for Deferring Billing", "subscriptions"),
+            ("API for Refunding the Subscription Fee", "subscriptions"),
+            ("API for Revoking a Subscription", "subscriptions"),
+            ("API for Sending", "iap-notifications"),
+            ("Notification", "iap-notifications"),
+            ("Data Models", "iap-appendix"),
+            ("Result Codes", "iap-appendix"),
+        ),
+        default_group="iap-guide",
+    ),
+    # REST API IAP Kit (HarmonyOS 5 и новее): операции в снимке только для поиска (исключены
+    # с callable = false), подпись JWT и проверка JWS ответов в сервере не сделаны.
+    Source(
+        catalog="harmonyos-references",
+        anchor="iap-rest-common-statement",
+        root="IAP Kit / REST API",
+        page_url="https://developer.huawei.com/consumer/en/doc/harmonyos-references/",
+        groups=(),
+        default_group="iapkit",
+    ),
 )
 
 # Заголовки авторизации: их добавляет исполнитель запросов, в параметры операций они
@@ -120,10 +198,20 @@ RESULT_ENVELOPES: tuple[tuple[str, str, str], ...] = (
     ("ret", "rtnCode", "rtnDesc"),
     ("error", "errorCode", "errorMsg"),
 )
+# Конверт HMS IAP: код и текст в корне тела (`field` — пустая строка).
+ROOT_ENVELOPE: tuple[str, str, str] = ("", "responseCode", "responseMessage")
 
 
 class PortalError(Exception):
-    """Портал документации недоступен или ответил не тем, что ожидалось."""
+    """Портал документации недоступен после повторов или вышел лимит времени (код 4)."""
+
+
+class ReferenceChanged(Exception):
+    """Дерево справочника устроено иначе, чем ждёт скрипт: нет корневого узла (код 3)."""
+
+
+class ScriptError(Exception):
+    """Ошибка, которую повтор не исправит: локальные файлы, ответ портала 4xx (код 1)."""
 
 
 # ---------------------------------------------------------------------------
@@ -493,12 +581,13 @@ def split_url(url: str) -> tuple[str | None, list[str], list[str]]:
     """Путь от корня хоста, параметры пути и имена параметров запроса из ячейки URL.
 
     В ячейке кроме адреса бывают пояснения (домены регионов); адрес — первое слово,
-    похожее на URL. `None`, если адреса нет: файл отправляется на адрес из ответа API.
+    похожее на URL. У HMS IAP адрес начинается с `{rootUrl}` (хост сайта). `None`, если
+    адреса нет: файл отправляется на адрес из ответа API.
     """
-    match = re.search(r"https?://\S+|(?<![\w.])/api/\S+", url)
+    match = re.search(r"https?://\S+|\{rootUrl\}/\S+|(?<![\w.])/api/\S+", url)
     if not match:
         return None, [], []
-    text = re.sub(r"^https?://[^/]+", "", match.group(0)).rstrip(".,;")
+    text = re.sub(r"^(?:https?://[^/]+|\{rootUrl\})", "", match.group(0)).rstrip(".,;")
     path, _, query = text.partition("?")
     path_params = re.findall(r"\{([^{}]+)\}", path)
     query_names = [part.split("=", 1)[0] for part in query.split("&") if part]
@@ -511,16 +600,24 @@ def detect_envelope(response_fields: list[dict], example: str) -> dict | None:
         body = json.loads(example) if example.strip() else None
     except ValueError:
         body = None
+    root_name, root_code, root_message = ROOT_ENVELOPE
+    root = {"field": root_name, "codeField": root_code, "messageField": root_message}
     if isinstance(body, dict):
         for name, code, message in RESULT_ENVELOPES:
             inner = body.get(name)
             if isinstance(inner, dict) and code in inner:
                 return {"field": name, "codeField": code, "messageField": message, "source": "example"}
+        if root_code in body:
+            return {**root, "source": "example"}
     # Пример бывает невалидным JSON: ищем поля текстом.
     for name, code, message in RESULT_ENVELOPES:
         if re.search(rf'"{name}"\s*:\s*\{{[^{{}}]*"{code}"', example):
             return {"field": name, "codeField": code, "messageField": message, "source": "example-text"}
+    if re.search(rf'"{root_code}"\s*:', example):
+        return {**root, "source": "example-text"}
     for item in response_fields:
+        if item["name"] == root_code:
+            return {**root, "source": "table"}
         if item["name"] == "ret":
             comments = "rtncode" in item.get("description", "").lower() or item.get("schema", {}).get(
                 "model"
@@ -718,92 +815,161 @@ def _cross_check(draft: dict) -> None:
 # ---------------------------------------------------------------------------
 
 
-def post_json(url: str, payload: dict) -> dict:
-    """POST с повторами. Ошибка сети, таймаут, HTTP 429/5xx и неверный JSON — PortalError."""
+def _retry_after(value: str | None) -> float | None:
+    """Retry-After в секундах; дата вместо числа не разбирается."""
+    try:
+        seconds = float(value) if value else None
+    except ValueError:
+        return None
+    return seconds if seconds is not None and math.isfinite(seconds) and seconds >= 0 else None
+
+
+def post_json(url: str, payload: dict, deadline: float | None = None, accept=None) -> dict:
+    """POST с повторами.
+
+    Сеть, таймаут, HTTP 408, 429, 5xx, неверный JSON и ответ, который отверг `accept`
+    (функция от объекта ответа: причина отказа или None), повторяются до ATTEMPTS раз с
+    паузами RETRY_DELAYS (не меньше Retry-After). Исчерпаны попытки или `deadline`
+    (момент по `_now`) — PortalError. Другой HTTP 4xx — ScriptError без повторов.
+    """
     body = json.dumps(payload).encode("utf-8")
     last = ""
     for attempt in range(1, ATTEMPTS + 1):
+        timeout: float = TIMEOUT_SECONDS
+        if deadline is not None:
+            left = deadline - _now()
+            if left <= 0:
+                raise PortalError(f"{url}: вышел общий лимит времени")
+            timeout = min(timeout, left)
         request = urllib.request.Request(
             url,
             data=body,
             headers={"Content-Type": "application/json", "User-Agent": USER_AGENT},
             method="POST",
         )
+        wait_hint = None
         try:
-            with urllib.request.urlopen(request, timeout=TIMEOUT_SECONDS) as response:
+            with _urlopen(request, timeout=timeout) as response:
                 data = json.loads(response.read().decode("utf-8"))
-            if isinstance(data, dict):
-                return data
-            last = "ответ не является объектом JSON"
+            if not isinstance(data, dict):
+                last = "ответ не является объектом JSON"
+            else:
+                problem = accept(data) if accept else None
+                if problem is None:
+                    return data
+                last = problem
         except urllib.error.HTTPError as error:
             last = f"HTTP {error.code}"
+            wait_hint = _retry_after(error.headers.get("Retry-After") if error.headers else None)
+            error.close()
             if error.code not in (408, 429) and error.code < 500:
-                break
-        except (urllib.error.URLError, TimeoutError, OSError, ValueError) as error:
-            last = str(error) or type(error).__name__
-        if attempt < ATTEMPTS:
-            time.sleep(min(2 ** attempt, 20))
-    raise PortalError(f"{url}: {last}")
+                raise ScriptError(
+                    f"{url}: портал ответил {last}; похоже, изменился сам портал документации, "
+                    "повтор не поможет"
+                ) from None
+        except (urllib.error.URLError, http.client.HTTPException, OSError, ValueError) as error:
+            last = str(getattr(error, "reason", None) or error) or type(error).__name__
+        if attempt == ATTEMPTS:
+            break
+        delay = float(RETRY_DELAYS[min(attempt, len(RETRY_DELAYS)) - 1])
+        if wait_hint is not None:
+            delay = max(delay, min(wait_hint, RETRY_AFTER_MAX))
+        if deadline is not None and _now() + delay >= deadline:
+            raise PortalError(f"{url}: {last}; на повтор не хватает общего лимита времени")
+        print(f"{url}: {last}; попытка {attempt} из {ATTEMPTS}, повтор через {delay:g} с",
+              file=sys.stderr)
+        _sleep(delay)
+    raise PortalError(f"{url}: {last} (попыток: {ATTEMPTS})")
+
+
+def _dig(data, *keys):
+    """Значение по цепочке ключей; None, если по дороге не объект."""
+    for key in keys:
+        if not isinstance(data, dict):
+            return None
+        data = data.get(key)
+    return data
+
+
+def _tree_problem(data: dict) -> str | None:
+    nodes = _dig(data, "value", "catalogTreeList")
+    if not isinstance(nodes, list) or not nodes:
+        return "в ответе нет value.catalogTreeList"
+    return None
+
+
+def _page_problem(data: dict) -> str | None:
+    content = _dig(data, "value", "content", "content")
+    if not isinstance(content, str) or not content.strip():
+        return "в ответе нет value.content.content"
+    return None
 
 
 class Portal:
     """Источник дерева и страниц: сеть или каталог с ранее скачанными файлами."""
 
-    def __init__(self, from_dir: Path | None = None, save_dir: Path | None = None) -> None:
+    def __init__(
+        self,
+        from_dir: Path | None = None,
+        save_dir: Path | None = None,
+        time_limit: float | None = None,
+    ) -> None:
         self.from_dir = from_dir
         self.save_dir = save_dir
+        self.started = _now()
+        self.deadline = self.started + time_limit if time_limit else None
         self._last_request = 0.0
+        # Дерево каталога одно для любой страницы-якоря: разделы одного каталога читают
+        # его один раз.
+        self._trees: dict[str, list[dict]] = {}
 
     def _pause(self) -> None:
-        wait = PAUSE_SECONDS - (time.monotonic() - self._last_request)
+        wait = PAUSE_SECONDS - (_now() - self._last_request)
         if wait > 0:
-            time.sleep(wait)
-        self._last_request = time.monotonic()
+            _sleep(wait)
+        self._last_request = _now()
 
-    def _cached(self, name: str) -> dict | None:
-        if self.from_dir is None:
-            return None
-        path = self.from_dir / name
-        try:
-            return json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, ValueError) as error:
-            raise PortalError(f"{path}: {error}") from error
-
-    def _save(self, name: str, data: dict) -> None:
-        if self.save_dir is None:
-            return
-        path = self.save_dir / name
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+    def _fetch(self, name: str, url: str, payload: dict, problem) -> dict:
+        """Ответ портала из `from_dir` или из сети (с повторами и лимитом времени)."""
+        if self.from_dir is not None:
+            path = self.from_dir / name
+            try:
+                data = json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, ValueError) as error:
+                raise ScriptError(f"{path}: {error}") from error
+            reason = problem(data) if isinstance(data, dict) else "не объект JSON"
+            if reason:
+                raise ScriptError(f"{path}: {reason}")
+            return data
+        self._pause()
+        data = post_json(url, payload, self.deadline, problem)
+        if self.save_dir is not None:
+            path = self.save_dir / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+        return data
 
     def tree(self, source: Source) -> list[dict]:
-        name = f"tree.{source.catalog}.json"
-        data = self._cached(name)
-        if data is None:
-            self._pause()
-            data = post_json(
+        if source.catalog not in self._trees:
+            data = self._fetch(
+                f"tree.{source.catalog}.json",
                 TREE_URL,
                 {"language": LANGUAGE, "catalogName": source.catalog, "objectId": source.anchor},
+                _tree_problem,
             )
-            self._save(name, data)
-        nodes = (data.get("value") or {}).get("catalogTreeList")
-        if not isinstance(nodes, list):
-            raise PortalError(f"дерево каталога {source.catalog}: нет value.catalogTreeList")
-        return nodes
+            self._trees[source.catalog] = data["value"]["catalogTreeList"]
+        return self._trees[source.catalog]
 
     def page(self, page_id: str) -> tuple[str, str]:
         """Заголовок и HTML страницы."""
-        name = f"pages/{page_id}.json"
-        data = self._cached(name)
-        if data is None:
-            self._pause()
-            data = post_json(PAGE_URL, {"language": LANGUAGE, "objectId": page_id})
-            self._save(name, data)
-        value = data.get("value") or {}
-        content = (value.get("content") or {}).get("content")
-        if not isinstance(content, str) or not content.strip():
-            raise PortalError(f"страница {page_id}: нет value.content.content")
-        return str(value.get("title") or ""), content
+        data = self._fetch(
+            f"pages/{page_id}.json",
+            PAGE_URL,
+            {"language": LANGUAGE, "objectId": page_id},
+            _page_problem,
+        )
+        value = data["value"]
+        return str(value.get("title") or ""), value["content"]["content"]
 
 
 @dataclass(frozen=True)
@@ -823,22 +989,31 @@ class PageRef:
         return ""
 
 
+ROOT_PATH_SEPARATOR = " / "
+
+
 def find_root(nodes: list[dict], name: str) -> dict | None:
-    """Узел с именем `name`; из нескольких — тот, у которого больше дочерних страниц."""
+    """Узел с именем `name`; из нескольких — тот, у которого больше дочерних страниц.
+
+    `name` с « / » — путь: последнее имя — имя узла, предыдущие — имена его ближайших
+    предков по порядку (не обязательно от корня дерева).
+    """
+    wanted = [squash(part) for part in name.split(ROOT_PATH_SEPARATOR)]
     best: dict | None = None
     best_size = -1
 
-    def walk(node: dict) -> None:
+    def walk(node: dict, names: tuple[str, ...]) -> None:
         nonlocal best, best_size
-        if squash(str(node.get("nodeName") or "")) == name:
+        here = names + (squash(str(node.get("nodeName") or "")),)
+        if list(here[-len(wanted):]) == wanted:
             size = len(node.get("children") or [])
             if size > best_size:
                 best, best_size = node, size
         for child in node.get("children") or []:
-            walk(child)
+            walk(child, here)
 
     for node in nodes:
-        walk(node)
+        walk(node, ())
     return best
 
 
@@ -846,7 +1021,7 @@ def collect_pages(source: Source, nodes: list[dict]) -> list[PageRef]:
     """Страницы под корневым узлом раздела в порядке дерева."""
     root = find_root(nodes, source.root)
     if root is None:
-        raise PortalError(f"каталог {source.catalog}: нет узла «{source.root}»")
+        raise ReferenceChanged(f"в дереве каталога {source.catalog} нет узла «{source.root}»")
     pages: list[PageRef] = []
     seen: set[str] = set()
 
@@ -966,7 +1141,11 @@ def page_url(page: dict) -> str:
 def format_diff(diff: LockDiff) -> str:
     if diff.is_empty():
         return "Справочник не изменился.\n"
-    lines: list[str] = []
+    lines: list[str] = [
+        f"Справочник изменился: изменено {len(diff.changed)}, новых {len(diff.added)}, "
+        f"пропало {len(diff.removed)}, переименовано или перенесено {len(diff.moved)}.",
+        "",
+    ]
 
     def section(title: str, pages: list[dict]) -> None:
         if not pages:
@@ -1054,16 +1233,21 @@ def main(argv: list[str] | None = None) -> int:
                         help="читать дерево и страницы из каталога, заполненного --draft")
     parser.add_argument("--lock-file", metavar="FILE", type=Path, default=LOCK_FILE,
                         help="путь к pages.lock.json (по умолчанию рядом со скриптом)")
+    parser.add_argument("--time-limit", metavar="SECONDS", type=float, default=TIME_LIMIT_SECONDS,
+                        help=f"общий лимит времени на загрузку, 0 — без лимита (по умолчанию "
+                             f"{TIME_LIMIT_SECONDS})")
     parser.add_argument("--quiet", action="store_true", help="не печатать ход загрузки")
     try:
         args = parser.parse_args(argv)
     except SystemExit as error:
-        return EXIT_OK if error.code == 0 else EXIT_UNAVAILABLE
+        return EXIT_OK if error.code == 0 else EXIT_USAGE
     progress = None if args.quiet else _progress
+    time_limit = args.time_limit if args.time_limit > 0 else None
 
     try:
         if args.draft is not None:
-            portal = Portal(from_dir=args.from_dir, save_dir=None if args.from_dir else args.draft)
+            portal = Portal(from_dir=args.from_dir, save_dir=None if args.from_dir else args.draft,
+                            time_limit=time_limit)
             draft = build_draft(portal, progress)
             args.draft.mkdir(parents=True, exist_ok=True)
             target = args.draft / "draft.json"
@@ -1075,8 +1259,9 @@ def main(argv: list[str] | None = None) -> int:
             )
             return EXIT_OK
 
-        portal = Portal(from_dir=args.from_dir)
+        portal = Portal(from_dir=args.from_dir, time_limit=time_limit)
         lock = build_lock(portal, progress)
+        print(f"страниц: {len(lock['pages'])}, за {_now() - portal.started:.0f} с", file=sys.stderr)
         if args.lock:
             args.lock_file.write_text(dump_lock(lock), encoding="utf-8")
             print(f"{args.lock_file}: страниц {len(lock['pages'])}")
@@ -1086,13 +1271,26 @@ def main(argv: list[str] | None = None) -> int:
             saved = load_lock(args.lock_file)
         except (OSError, ValueError) as error:
             print(f"ошибка: {error}", file=sys.stderr)
-            return EXIT_UNAVAILABLE
+            return EXIT_ERROR
         diff = compare_locks(saved, lock)
         sys.stdout.write(format_diff(diff))
         return EXIT_OK if diff.is_empty() else EXIT_CHANGED
+    except ReferenceChanged as error:
+        print(
+            f"Справочник изменился: {error}. Страницы не сверены: поправь SOURCES в "
+            "update_spec.py и проверь снимок вручную.",
+        )
+        return EXIT_CHANGED
     except PortalError as error:
-        print(f"ошибка: портал документации недоступен: {error}", file=sys.stderr)
+        print(
+            f"ошибка: портал документации недоступен: {error}\n"
+            "Это не изменение справочника: снимок не сверен, повтори проверку позже.",
+            file=sys.stderr,
+        )
         return EXIT_UNAVAILABLE
+    except ScriptError as error:
+        print(f"ошибка: {error}", file=sys.stderr)
+        return EXIT_ERROR
 
 
 if __name__ == "__main__":

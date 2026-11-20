@@ -4,6 +4,10 @@ expression: "snapshot_view(op(\"update_product\"))"
 ---
 {
   "access": "destructive",
+  "auth_modes": [
+    "api-client",
+    "oauth-client"
+  ],
   "body": "Json",
   "description": "The product is addressed by resource.productNo. The product type and the subscription period cannot be changed. Only the prices listed in resource.prices are changed. For a subscription, force 1 applies the new price to existing subscribers. Price changes affect what users pay. The reference does not say whether a product that does not exist yet is created.\n\nDestructive: changes products and their prices: this affects what users pay.",
   "group": "pms",

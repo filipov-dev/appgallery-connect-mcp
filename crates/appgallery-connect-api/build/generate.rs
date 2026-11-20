@@ -2,7 +2,7 @@
 //!
 //! Этапы: группы → внешние операции → разбор операций снимка (параметры, тело, ответ,
 //! конверт результата) → наборы → уровни доступа → исключения → секретные поля ответов →
-//! имена инструментов → описания и схемы аргументов → вывод `GROUPS`, `TOOLSETS`,
+//! операции с API-клиентом проекта → имена инструментов → описания и схемы аргументов → вывод `GROUPS`, `TOOLSETS`,
 //! `OPERATIONS` и `EXCLUDED`.
 //!
 //! Секретные поля (`[[secrets]]` дополнения) сверяются со схемой ответа `200` операции:
@@ -10,9 +10,25 @@
 //! секретов в ядре опирается на имена полей снимка, а переименование поля в снимке не
 //! оставит секрет незамеченным.
 //!
+//! Операции из `[[project_credentials]]` получают `OperationDef::project_param` — параметр
+//! с идентификатором проекта, по которому исполнитель выбирает API-клиент проекта. Параметр
+//! проверяется по снимку (есть, обязателен, скаляр не в теле), а операция — по
+//! `x-agc-auth-modes` (режим `api-client`, если расширение есть).
+//!
+//! Операции с `x-agc-service` (HMS IAP: `iap-orders`, `iap-subscriptions`) идут на хост
+//! своего сервиса и подписываются секретом приложения: путь у них без `/api/` и без
+//! параметров пути, конверт результата может лежать в корне тела (`field` — пустая
+//! строка), а генератор сам добавляет им аргумент `appId` (`ParamLocation::Credential`),
+//! который выбирает секрет приложения и в запрос не уходит.
+//!
 //! Все ошибки — и формы снимка, и согласования дополнения со снимком — собираются в
 //! список и выводятся разом: так одна правка снимка показывает все проблемы за один
 //! прогон, а тесты проверяют ошибки на испорченном дополнении без паники.
+//!
+//! Поля-строки ответа с JSON внутри помечены в схеме ответа снимка расширением
+//! `x-agc-json` (схема разобранного значения): генератор собирает их пути в
+//! `OperationDef::json_strings`, и сервер отдаёт агенту разобранный объект. Поля из
+//! `[[omit]]` дополнения (`OperationDef::omitted`) сервер убирает из ответа.
 //!
 //! Внешние операции (`x-agc-external-operations`: отправка файла на адрес из ответа API)
 //! в таблицы не попадают: пути на хосте API у них нет, их выполняет составной инструмент
@@ -49,7 +65,29 @@ const OPERATION_KEYS: &[&str] = &[
     "x-agc-result",
     "x-agc-auth-modes",
     "x-agc-reference",
+    "x-agc-service",
 ];
+
+/// Сервисы `x-agc-service` и варианты `ApiService` в `service.rs`. Нет расширения —
+/// `connect`.
+const SERVICES: &[(&str, &str)] = &[
+    ("connect", "Connect"),
+    ("iap-orders", "IapOrders"),
+    ("iap-subscriptions", "IapSubscriptions"),
+    ("iap-kit", "IapKit"),
+];
+
+/// Сервис REST API IAP Kit (HarmonyOS 5 и новее): в снимке только для поиска, подписи
+/// JWT ES256 в сервере нет, поэтому его операции — только в `[[exclude]]` с
+/// `callable = false`.
+const IAP_KIT_SERVICE: &str = "iap-kit";
+
+/// Сервис AppGallery Connect API.
+const CONNECT_SERVICE: &str = "connect";
+
+/// Аргумент, который генератор добавляет операциям HMS IAP: App ID приложения, чей
+/// секрет подписывает запрос.
+const APP_PARAM: &str = "appId";
 
 /// Ключи параметра снимка.
 const PARAM_KEYS: &[&str] = &[
@@ -73,9 +111,13 @@ const EXTERNAL_KEYS: &[&str] = &[
     "x-agc-url-source",
 ];
 
-/// Режимы авторизации `x-agc-auth-modes`. В таблицы не попадают: справочник говорит
-/// о них в описаниях операций.
-const AUTH_MODES: &[&str] = &["api-client", "oauth-client", "service-account"];
+/// Режимы авторизации `x-agc-auth-modes` и их имена в `AuthMode` (`OperationDef::auth_modes`):
+/// исполнитель не отправляет запрос операции, которой нет в режиме профиля.
+const AUTH_MODES: &[(&str, &str)] = &[
+    ("api-client", "AuthMode::ApiClient"),
+    ("oauth-client", "AuthMode::OAuthClient"),
+    ("service-account", "AuthMode::ServiceAccount"),
+];
 
 /// Заголовки авторизации добавляет исполнитель: параметром операции они быть не могут.
 const AUTH_HEADERS: &[&str] = &["authorization", "client_id", "teamid", "oauth2token"];
@@ -89,6 +131,8 @@ enum Location {
     Query,
     Header,
     Body,
+    /// Аргумент выбирает секрет приложения и в запрос не уходит.
+    Credential,
 }
 
 impl Location {
@@ -98,6 +142,7 @@ impl Location {
             Self::Query => "ParamLocation::Query",
             Self::Header => "ParamLocation::Header",
             Self::Body => "ParamLocation::Body",
+            Self::Credential => "ParamLocation::Credential",
         }
     }
 }
@@ -147,6 +192,10 @@ struct Secret {
     hint: String,
 }
 
+/// Параметры, в которых операция сервиса проекта получает идентификатор проекта: по нему
+/// исполнитель выбирает API-клиент проекта (`[[project_credentials]]` без `param`).
+const PROJECT_PARAMS: &[&str] = &["productId", "projectId"];
+
 /// Предел вложенности `$ref` при проверке путей секретных полей.
 const MAX_SECRET_REF_DEPTH: usize = 16;
 
@@ -180,6 +229,22 @@ struct Operation {
     response_schema: Option<Value>,
     /// Секретные поля ответа, по пути.
     secrets: Vec<Secret>,
+    /// `x-agc-auth-modes` снимка; `None` — расширения нет.
+    auth_modes: Option<Vec<String>>,
+    /// Параметр с идентификатором проекта, если операции нужен API-клиент проекта.
+    project_param: Option<String>,
+    /// `x-agc-service` снимка (`connect`, если расширения нет).
+    service: String,
+    /// Пути полей-строк ответа с JSON внутри (`x-agc-json`).
+    json_strings: Vec<String>,
+    /// Поля ответа, которые сервер убирает (`[[omit]]`): путь и причина.
+    omitted: Vec<(String, String)>,
+}
+
+impl Operation {
+    fn is_iap(&self) -> bool {
+        self.service != CONNECT_SERVICE
+    }
 }
 
 pub struct Output {
@@ -224,6 +289,8 @@ pub fn generate(spec: &Value, overlay: &Overlay) -> Output {
     apply_access(overlay, &path_ids, &mut operations, &mut errors);
     apply_exclusions(overlay, &known, &external_ids, &mut operations, &mut errors);
     apply_secrets(overlay, schemas, &mut operations, &mut errors);
+    apply_omit(overlay, schemas, &mut operations, &mut errors);
+    apply_project_credentials(overlay, &mut operations, &mut errors);
     for op in &mut operations {
         match toolset_of.get(&op.operation_id) {
             Some(toolset) => op.toolset = toolset.clone(),
@@ -289,15 +356,39 @@ fn collect_operations(
     let mut operations = Vec::new();
     let mut ids = BTreeSet::new();
     for (path, item) in sorted_entries(paths) {
-        if !path.starts_with("/api/") || path.contains('?') || path.contains("//") {
-            errors.push(format!(
-                "{path}: путь должен начинаться с /api/ и не содержать query"
-            ));
-        }
         let Some(item) = item.as_object() else {
             errors.push(format!("{path}: описание пути не является объектом"));
             continue;
         };
+        // Пути HMS IAP — без `/api/`; у одного пути не бывает операций разных сервисов.
+        let services: BTreeSet<&str> = item
+            .values()
+            .map(|raw| {
+                raw.get("x-agc-service")
+                    .and_then(Value::as_str)
+                    .unwrap_or(CONNECT_SERVICE)
+            })
+            .collect();
+        let iap = !services.is_empty() && !services.contains(CONNECT_SERVICE);
+        if services.len() > 1 {
+            errors.push(format!("{path}: у операций пути разные x-agc-service"));
+        }
+        if iap {
+            if !path.starts_with('/')
+                || path.starts_with("/api/")
+                || path.contains(['?', '{', '}'])
+                || path.contains("//")
+            {
+                errors.push(format!(
+                    "{path}: путь операции HMS IAP начинается с / (не с /api/) и не содержит \
+                     query и параметров пути"
+                ));
+            }
+        } else if !path.starts_with("/api/") || path.contains('?') || path.contains("//") {
+            errors.push(format!(
+                "{path}: путь должен начинаться с /api/ и не содержать query"
+            ));
+        }
         for (method, raw) in sorted_entries(item) {
             if !HTTP_METHODS.contains(&method.as_str()) {
                 errors.push(format!("{path}: неподдерживаемый ключ {method}"));
@@ -364,8 +455,28 @@ fn parse_operation(
             "x-agc-reference должен вести на {REFERENCE_PREFIX}"
         ));
     }
+    let service = match object.get("x-agc-service") {
+        None => CONNECT_SERVICE.to_owned(),
+        Some(Value::String(slug)) if SERVICES.iter().any(|(known, _)| known == slug) => {
+            slug.clone()
+        }
+        Some(other) => {
+            error(format!("неизвестный x-agc-service {other}"));
+            CONNECT_SERVICE.to_owned()
+        }
+    };
     let result = parse_result(object.get("x-agc-result"), &mut error);
     check_auth_modes(object.get("x-agc-auth-modes"), &mut error);
+    let auth_modes = object
+        .get("x-agc-auth-modes")
+        .and_then(Value::as_array)
+        .map(|modes| {
+            modes
+                .iter()
+                .filter_map(Value::as_str)
+                .map(str::to_owned)
+                .collect()
+        });
     let deprecated = match object.get("deprecated") {
         None => false,
         Some(Value::Bool(flag)) => *flag,
@@ -417,6 +528,49 @@ fn parse_operation(
         .cloned();
     let resolver_errors = std::mem::take(&mut resolver.errors);
     errors.extend(resolver_errors);
+    let json_strings = match response_schema.as_ref() {
+        Some(root) if json_response => {
+            let mut found = Vec::new();
+            collect_json_strings(schemas, root, "", 0, &mut found, &mut |text| {
+                errors.push(format!("{operation_id}: x-agc-json: {text}"))
+            });
+            found
+        }
+        _ => Vec::new(),
+    };
+    if service != CONNECT_SERVICE {
+        // Аргумент выбора секрета приложения: в запрос не уходит.
+        if params.iter().any(|param| param.name == APP_PARAM) {
+            errors.push(format!(
+                "{operation_id}: у операции HMS IAP не может быть своего параметра {APP_PARAM}: \
+                 его добавляет генератор"
+            ));
+        } else {
+            params.insert(
+                0,
+                Param {
+                    name: APP_PARAM.to_owned(),
+                    location: Location::Credential,
+                    required: true,
+                    description: "App ID of the app whose app secret signs this request (My \
+                                  apps > the app > App information). It selects the stored \
+                                  app secret and is not sent to Huawei."
+                        .to_owned(),
+                    value_type: "String",
+                    repeated: false,
+                    schema: json!({"type": "string", "pattern": "^[0-9]{1,20}$"}),
+                },
+            );
+        }
+        if params
+            .iter()
+            .any(|param| param.location == Location::Header)
+        {
+            errors.push(format!(
+                "{operation_id}: у операции HMS IAP не бывает параметров-заголовков"
+            ));
+        }
+    }
 
     Some(Operation {
         group,
@@ -442,6 +596,11 @@ fn parse_operation(
         input_schema: String::new(),
         response_schema,
         secrets: Vec::new(),
+        auth_modes,
+        project_param: None,
+        service,
+        json_strings,
+        omitted: Vec::new(),
         operation_id,
     })
 }
@@ -464,14 +623,26 @@ fn parse_result(raw: Option<&Value>, error: &mut impl FnMut(String)) -> Option<R
         return None;
     }
     let field = |key: &str| string_field(object, key);
-    match (field("field"), field("codeField"), field("messageField")) {
+    // Пустой `field` — код и текст в корне тела (HMS IAP: `responseCode`).
+    let root = object
+        .get("field")
+        .and_then(Value::as_str)
+        .is_some_and(str::is_empty);
+    let envelope_field = if root {
+        Some(String::new())
+    } else {
+        field("field")
+    };
+    match (envelope_field, field("codeField"), field("messageField")) {
         (Some(field), Some(code_field), Some(message_field)) => Some(ResultEnvelope {
             field,
             code_field,
             message_field,
         }),
         _ => {
-            error("поля x-agc-result должны быть непустыми строками".to_owned());
+            error(
+                "поля x-agc-result должны быть строками; пустым может быть только field".to_owned(),
+            );
             None
         }
     }
@@ -486,7 +657,10 @@ fn check_auth_modes(raw: Option<&Value>, error: &mut impl FnMut(String)) {
         return;
     };
     for mode in modes {
-        if !mode.as_str().is_some_and(|m| AUTH_MODES.contains(&m)) {
+        if !mode
+            .as_str()
+            .is_some_and(|m| AUTH_MODES.iter().any(|(name, _)| *name == m))
+        {
             error(format!("неизвестный режим авторизации {mode}"));
         }
     }
@@ -956,6 +1130,19 @@ fn apply_exclusions(
             ));
         }
     }
+    for op in operations.iter() {
+        if op.service == IAP_KIT_SERVICE
+            && !excluded
+                .get(op.operation_id.as_str())
+                .is_some_and(|rule| !rule.callable)
+        {
+            errors.push(format!(
+                "{}: операция IAP Kit должна быть в [[exclude]] с callable = false: сервер не \
+                 подписывает запросы ключом IAP Kit",
+                op.operation_id
+            ));
+        }
+    }
     for op in operations {
         if let Some(rule) = deprecated.get(op.operation_id.as_str()) {
             op.exclusion = Some(Exclusion::Deprecated);
@@ -1047,6 +1234,124 @@ fn apply_secrets(
             ));
         }
     }
+}
+
+/// Операции, которым нужен API-клиент уровня проекта (`[[project_credentials]]`):
+/// операции из `operations` и все операции-инструменты групп из `groups`. Параметр с
+/// идентификатором проекта — `param` или единственный из [`PROJECT_PARAMS`]; он должен
+/// быть обязательным скаляром пути, запроса или заголовка. Операция, для которой
+/// справочник называет режимы авторизации без `api-client`, помечаться не может.
+fn apply_project_credentials(
+    overlay: &Overlay,
+    operations: &mut [Operation],
+    errors: &mut Vec<String>,
+) {
+    let mut marked: BTreeSet<String> = BTreeSet::new();
+    for rule in &overlay.project_credentials {
+        if rule.groups.is_empty() && rule.operations.is_empty() {
+            errors.push("[[project_credentials]]: нужны groups или operations".to_owned());
+            continue;
+        }
+        let mut targets: Vec<String> = Vec::new();
+        for group in &rule.groups {
+            if !overlay.groups.iter().any(|g| &g.slug == group) {
+                errors.push(format!(
+                    "[[project_credentials]]: группы {group} нет в [[groups]]"
+                ));
+                continue;
+            }
+            targets.extend(
+                operations
+                    .iter()
+                    .filter(|op| &op.group == group && op.exclusion.is_none())
+                    .map(|op| op.operation_id.clone()),
+            );
+        }
+        for id in &rule.operations {
+            match operations.iter().find(|op| &op.operation_id == id) {
+                None => errors.push(format!(
+                    "[[project_credentials]]: операции {id} нет в снимке; убери её из spec/overlay.toml"
+                )),
+                Some(op) if op.exclusion.is_some() => errors.push(format!(
+                    "[[project_credentials]]: операция {id} исключена; клиент проекта задаётся только инструментам"
+                )),
+                Some(_) => targets.push(id.clone()),
+            }
+        }
+        for id in targets {
+            if !marked.insert(id.clone()) {
+                errors.push(format!(
+                    "[[project_credentials]]: операция {id} указана дважды"
+                ));
+                continue;
+            }
+            let Some(op) = operations.iter_mut().find(|op| op.operation_id == id) else {
+                continue;
+            };
+            match project_param(op, rule.param.as_deref()) {
+                Ok(name) => op.project_param = Some(name),
+                Err(text) => errors.push(format!("[[project_credentials]] {id}: {text}")),
+            }
+        }
+    }
+}
+
+/// Параметр операции с идентификатором проекта (см. [`apply_project_credentials`]).
+fn project_param(op: &Operation, explicit: Option<&str>) -> Result<String, String> {
+    if op.is_iap() {
+        return Err(
+            "операция HMS IAP подписывается секретом приложения, а не клиентом проекта".to_owned(),
+        );
+    }
+    if let Some(modes) = &op.auth_modes
+        && !modes.iter().any(|mode| mode == "api-client")
+    {
+        return Err(format!(
+            "справочник описывает операцию только для режимов {modes:?}, без api-client"
+        ));
+    }
+    let candidates: Vec<&Param> = match explicit {
+        Some(name) => op.params.iter().filter(|p| p.name == name).collect(),
+        None => op
+            .params
+            .iter()
+            .filter(|p| PROJECT_PARAMS.contains(&p.name.as_str()))
+            .collect(),
+    };
+    let param = match candidates.as_slice() {
+        [param] => *param,
+        [] => {
+            return Err(match explicit {
+                Some(name) => format!("у операции нет параметра {name}"),
+                None => format!(
+                    "у операции нет параметра {}; задай param",
+                    PROJECT_PARAMS.join(" или ")
+                ),
+            });
+        }
+        _ => {
+            return Err(format!(
+                "у операции несколько параметров {}; задай param",
+                PROJECT_PARAMS.join(" и ")
+            ));
+        }
+    };
+    if param.location == Location::Body {
+        return Err("идентификатор проекта не может быть телом запроса".to_owned());
+    }
+    if !param.required {
+        return Err(format!(
+            "параметр {} должен быть обязательным: без него не выбрать клиента проекта",
+            param.name
+        ));
+    }
+    if !matches!(param.value_type, "String" | "Integer") {
+        return Err(format!(
+            "параметр {} должен быть строкой или целым числом",
+            param.name
+        ));
+    }
+    Ok(param.name.clone())
 }
 
 /// Путь `a.b[].c` в схеме ответа: каждый сегмент — свойство объекта, `[]` — элемент
@@ -1217,6 +1522,25 @@ fn describe(op: &Operation) -> String {
         };
         parts.push(format!("{level}: {reason}"));
     }
+    if op.is_iap() {
+        parts.push(format!(
+            "App secret: this HMS In-App Purchases server API is not part of the AppGallery \
+             Connect API. The server signs the request with an app-level access token of the \
+             app given in `{APP_PARAM}`, obtained with the stored app secret of that app, not \
+             with its API client. The user stores the app secret with `appgallery-connect-mcp \
+             auth app-secret set`. `api_request` cannot call this operation."
+        ));
+    }
+    if let Some(text) = describe_response_changes(op) {
+        parts.push(text);
+    }
+    if let Some(param) = &op.project_param {
+        parts.push(format!(
+            "Project-level API client: the server signs this request with the API client of \
+             the project given in `{param}`, not with its team-level API client. The user adds \
+             it with `appgallery-connect-mcp auth project add`."
+        ));
+    }
     parts.join("\n\n")
 }
 
@@ -1365,6 +1689,43 @@ fn emit(overlay: &Overlay, operations: &[Operation], excluded: &[Operation]) -> 
             );
         }
         let _ = writeln!(out, "        ],");
+        match &op.project_param {
+            Some(param) => {
+                let _ = writeln!(out, "        project_param: Some({param:?}),");
+            }
+            None => {
+                let _ = writeln!(out, "        project_param: None,");
+            }
+        }
+        let modes: Vec<&str> = op
+            .auth_modes
+            .iter()
+            .flatten()
+            .filter_map(|mode| {
+                AUTH_MODES
+                    .iter()
+                    .find(|(name, _)| name == mode)
+                    .map(|(_, rust)| *rust)
+            })
+            .collect();
+        let _ = writeln!(out, "        auth_modes: &[{}],", modes.join(", "));
+        let service = SERVICES
+            .iter()
+            .find(|(slug, _)| *slug == op.service)
+            .map_or("Connect", |(_, variant)| variant);
+        let _ = writeln!(
+            out,
+            "        service: crate::service::ApiService::{service},"
+        );
+        let _ = writeln!(out, "        json_strings: &{:?},", op.json_strings);
+        let _ = writeln!(out, "        omitted: &[");
+        for (path, reason) in &op.omitted {
+            let _ = writeln!(
+                out,
+                "            OmittedFieldDef {{ path: {path:?}, reason: {reason:?} }},"
+            );
+        }
+        let _ = writeln!(out, "        ],");
         let _ = writeln!(out, "    }},");
     }
     out.push_str("];\n\n");
@@ -1388,4 +1749,146 @@ fn emit(overlay: &Overlay, operations: &[Operation], excluded: &[Operation]) -> 
     }
     out.push_str("];\n");
     out
+}
+
+/// Предел вложенности при поиске `x-agc-json` в схеме ответа.
+const MAX_JSON_STRING_DEPTH: usize = 8;
+
+/// Пути полей-строк с `x-agc-json` в схеме ответа (`a.b[].c`, как у `[[secrets]]`).
+/// Расширение допустимо только у свойства-строки, его значение — схема-объект; внутрь
+/// разобранного значения поиск не идёт.
+fn collect_json_strings(
+    schemas: &Map<String, Value>,
+    schema: &Value,
+    prefix: &str,
+    depth: usize,
+    found: &mut Vec<String>,
+    error: &mut impl FnMut(String),
+) {
+    if depth > MAX_JSON_STRING_DEPTH {
+        return;
+    }
+    let node = match deref_schema(schemas, schema) {
+        Ok(node) => node,
+        Err(text) => return error(text),
+    };
+    if let Some(items) = node.get("items") {
+        let path = format!("{prefix}[]");
+        collect_json_strings(schemas, items, &path, depth + 1, found, error);
+    }
+    let Some(Value::Object(properties)) = node.get("properties") else {
+        return;
+    };
+    for (name, property) in sorted_entries(properties) {
+        let path = if prefix.is_empty() {
+            name.clone()
+        } else {
+            format!("{prefix}.{name}")
+        };
+        match property.get("x-agc-json") {
+            Some(Value::Object(_)) => {
+                if property.get("type").and_then(Value::as_str) == Some("string") {
+                    found.push(path);
+                } else {
+                    error(format!("поле {path} должно быть строкой"));
+                }
+            }
+            Some(_) => error(format!(
+                "у поля {path} значение должно быть схемой-объектом"
+            )),
+            None => collect_json_strings(schemas, property, &path, depth + 1, found, error),
+        }
+    }
+}
+
+/// Поля, которые сервер убирает из ответа (`[[omit]]`): операция — инструмент с
+/// JSON-ответом, путь ведёт к полю-строке схемы ответа, поле не секретное и не строка с
+/// JSON, указано один раз.
+fn apply_omit(
+    overlay: &Overlay,
+    schemas: &Map<String, Value>,
+    operations: &mut [Operation],
+    errors: &mut Vec<String>,
+) {
+    for rule in &overlay.omit {
+        let reason = normalize_space(&rule.reason);
+        if reason.is_empty() {
+            errors.push("[[omit]]: у правила нет reason".to_owned());
+        }
+        if rule.operations.is_empty() || rule.fields.is_empty() {
+            errors.push("[[omit]]: нужны operations и fields".to_owned());
+        }
+        for id in &rule.operations {
+            let Some(op) = operations.iter_mut().find(|op| &op.operation_id == id) else {
+                errors.push(format!(
+                    "[[omit]]: операции {id} нет в снимке; убери её из spec/overlay.toml"
+                ));
+                continue;
+            };
+            if op.exclusion.is_some() {
+                errors.push(format!("[[omit]]: операция {id} исключена"));
+                continue;
+            }
+            let Some(root) = op.response_schema.as_ref().filter(|_| op.json_response) else {
+                errors.push(format!("[[omit]]: у операции {id} нет JSON-ответа"));
+                continue;
+            };
+            for field in &rule.fields {
+                if let Err(text) = check_secret_path(schemas, root, field) {
+                    errors.push(format!("[[omit]] {id}: поле {field}: {text}"));
+                    continue;
+                }
+                let taken = op.omitted.iter().any(|(path, _)| path == field)
+                    || op.secrets.iter().any(|secret| &secret.path == field)
+                    || op.json_strings.contains(field);
+                if taken {
+                    errors.push(format!(
+                        "[[omit]] {id}: поле {field} уже указано (в [[omit]], [[secrets]] или x-agc-json)"
+                    ));
+                    continue;
+                }
+                op.omitted.push((field.clone(), reason.clone()));
+            }
+        }
+    }
+    for op in operations.iter_mut() {
+        op.omitted.sort();
+    }
+}
+
+/// Абзац описания о том, как сервер меняет ответ: разбирает JSON-строки и убирает поля.
+fn describe_response_changes(op: &Operation) -> Option<String> {
+    let quote = |paths: &[&String]| {
+        let quoted: Vec<String> = paths.iter().map(|path| format!("`{path}`")).collect();
+        match quoted.split_last() {
+            Some((last, rest)) if !rest.is_empty() => format!("{} and {last}", rest.join(", ")),
+            _ => quoted.concat(),
+        }
+    };
+    let mut sentences = Vec::new();
+    let parsed: Vec<&String> = op.json_strings.iter().collect();
+    match parsed.len() {
+        0 => {}
+        1 => sentences.push(format!(
+            "{} is a JSON string in the API response; the server parses it into a JSON value.",
+            quote(&parsed)
+        )),
+        _ => sentences.push(format!(
+            "{} are JSON strings in the API response; the server parses them into JSON values.",
+            quote(&parsed)
+        )),
+    }
+    let mut reasons: Vec<&String> = op.omitted.iter().map(|(_, reason)| reason).collect();
+    reasons.sort();
+    reasons.dedup();
+    for reason in reasons {
+        let fields: Vec<&String> = op
+            .omitted
+            .iter()
+            .filter(|(_, why)| why == reason)
+            .map(|(path, _)| path)
+            .collect();
+        sentences.push(format!("The server removes {}: {reason}", quote(&fields)));
+    }
+    (!sentences.is_empty()).then(|| format!("Response: {}", sentences.join(" ")))
 }

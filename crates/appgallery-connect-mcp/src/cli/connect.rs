@@ -13,6 +13,11 @@
 //! `--silent` — тихий режим: ни вопросов, ни вывода, кроме ошибок; запись в клиент — как с
 //! `--yes` (чужую запись без `--force` не заменяет).
 //!
+//! Профиль со входом пользователя (`auth login --oauth`) `connect` не создаёт и не меняет
+//! его вход: рабочий сохранённый вход используется как есть (проверка — обновление access
+//! token и команда в списке команд), иначе — ошибка с подсказкой `auth login --oauth`.
+//! Скрытый флаг `--oauth` отклоняется с той же подсказкой.
+//!
 //! Секрет не проходит через агента и не попадает ни в аргументы, ни в окружение, ни в
 //! конфигурацию клиента: клиент получает только команду
 //! `appgallery-connect-mcp serve --profile <профиль> ...`.
@@ -38,7 +43,8 @@ use crate::login::{
     stored_message,
 };
 use crate::profiles::{
-    ProfileRepo, ProfileSettings, describe_region, parse_region, validate_profile_name,
+    ProfileKind, ProfileRepo, ProfileSettings, describe_region, parse_region, profile_team,
+    validate_profile_name,
 };
 use crate::ui::{SilentUi, TerminalUi, Ui};
 use crate::verify::Verifier;
@@ -71,6 +77,10 @@ clients.
 Re-running connect with the same settings changes nothing. An entry with the same name that \
 runs another server or another profile is replaced only after an explicit answer or with \
 --force. --dry-run shows what would change and changes nothing.
+
+A profile that signs in as a HUAWEI ID user (`auth login --oauth`) is connected with its stored \
+sign-in: connect checks it (unless --no-verify) and never signs in itself; run `auth login \
+--oauth --profile <profile>` first. The API client flags are refused for such a profile.
 
 --silent is for scripts and agents: no questions and no output except errors. It implies --yes \
 (an entry of another server is still replaced only with --force) and needs --client-id with \
@@ -170,6 +180,10 @@ pub struct ConnectArgs {
     /// Лишние позиционные аргументы (например, секрет): отклоняются без повтора значения.
     #[arg(hide = true, num_args = 0.., value_parser = discard)]
     pub stray: Vec<Discarded>,
+    /// Вход пользователя здесь не делается: флаг принимается, чтобы подсказать `auth login
+    /// --oauth`.
+    #[arg(long, hide = true)]
+    pub oauth: bool,
 }
 
 impl ConnectArgs {
@@ -325,6 +339,14 @@ pub async fn connect(
     let client = args.client;
     let profile = args.profile.profile.as_str();
     validate_profile_name(profile)?;
+    if args.oauth {
+        bail!(
+            "connect does not sign in users: run `appgallery-connect-mcp auth login --oauth \
+             --profile {profile}` first, then `appgallery-connect-mcp connect {} --profile \
+             {profile}` reuses the sign-in",
+            client.name()
+        );
+    }
 
     // Всё, что можно проверить без вопросов, — до первого вопроса пользователю.
     let flags = ServeFlags {
@@ -340,6 +362,28 @@ pub async fn connect(
     let packages = default_packages(&args.default_packages)?;
     let saved = env.repo.get(profile)?;
     let mut settings = saved.clone().unwrap_or_default();
+    let user_sign_in = settings.kind == ProfileKind::Oauth;
+    if user_sign_in {
+        if args.new_credentials_requested() {
+            bail!(
+                "profile `{profile}` signs in as a HUAWEI ID user (auth login --oauth): connect \
+                 does not replace the sign-in with an API client. Drop --client-id, \
+                 --secret-file and --secret-stdin, or switch the profile with \
+                 `appgallery-connect-mcp auth login --profile {profile}` first"
+            );
+        }
+        if let Some(region) = args.region
+            && region != settings.region
+        {
+            bail!(
+                "the region of profile `{profile}` comes from the site of its team ({}); \
+                 --region {} does not match it. Sign in again with `appgallery-connect-mcp auth \
+                 login --oauth --profile {profile}` to choose another team",
+                settings.region.slug(),
+                region.slug()
+            );
+        }
+    }
     if let Some(region) = args.region {
         settings.region = region;
     }
@@ -361,8 +405,14 @@ pub async fn connect(
     }
     env.ui.say(&region_line);
 
+    if user_sign_in {
+        // Вход пользователя проверяется до записи чего бы то ни было.
+        user_sign_in_works(env, profile, &settings).await?;
+    }
     if args.dry_run {
-        dry_run_credentials(env, args, profile, region, source).await?;
+        if !user_sign_in {
+            dry_run_credentials(env, args, profile, region, source).await?;
+        }
         env.ui.say(&format!(
             "Profile `{profile}` in {} would get access {}, toolsets: {}.",
             env.repo.path().display(),
@@ -376,7 +426,11 @@ pub async fn connect(
     } else {
         // Учётные данные проверяются до записи чего бы то ни было: при ошибке проверки
         // ничего не сохраняется и клиент не меняется.
-        let new_credentials = profile_credentials(env, args, profile, region, source).await?;
+        let new_credentials = if user_sign_in {
+            None
+        } else {
+            profile_credentials(env, args, profile, region, source).await?
+        };
         settings.client = Some(client.name().to_owned());
         settings.allow_write = flags.allow_write;
         settings.allow_destructive = flags.allow_destructive;
@@ -502,6 +556,45 @@ async fn stored_credentials_work(
             false
         }
     }
+}
+
+/// Проверяет вход пользователя профиля (если проверка не отключена): без рабочего входа
+/// `connect` ничего не меняет и подсказывает `auth login --oauth`.
+async fn user_sign_in_works(
+    env: &mut ConnectEnv<'_>,
+    profile: &str,
+    settings: &ProfileSettings,
+) -> anyhow::Result<()> {
+    let relogin = format!("appgallery-connect-mcp auth login --oauth --profile {profile}");
+    let team = profile_team(profile, settings)?;
+    let credentials = env.store.get_oauth(profile).map_err(|err| match err {
+        StoreError::OAuthNotFound { .. } | StoreError::OAuthCorrupted { .. } => {
+            anyhow::anyhow!("{err}; nothing was changed")
+        }
+        err => anyhow::Error::new(err).context("cannot read the system keychain"),
+    })?;
+    env.ui.say(&format!(
+        "Profile `{profile}` signs in as a HUAWEI ID user: OAuth client {}, team {team}.",
+        credentials.client().client_id().masked()
+    ));
+    let Some(verifier) = env.verifier else {
+        env.ui
+            .say("Keeping the stored sign-in (not checked: --no-verify).");
+        return Ok(());
+    };
+    let (latest, checked) = verifier
+        .check_user(settings.region, &credentials, &team)
+        .await;
+    crate::cli::auth::save_rotated(env.store, profile, &credentials, &latest);
+    checked.map_err(|err| {
+        anyhow::anyhow!(
+            "the user sign-in of profile `{profile}` does not work ({err:#}); sign in again \
+                 with `{relogin}`. Nothing was changed"
+        )
+    })?;
+    env.ui
+        .say("The stored sign-in works: HUAWEI ID issued an access token. Keeping it.");
+    Ok(())
 }
 
 /// Подсказка для запуска без терминала, когда учётных данных нет.

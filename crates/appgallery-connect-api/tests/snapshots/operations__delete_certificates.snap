@@ -1,0 +1,66 @@
+---
+source: crates/appgallery-connect-api/tests/operations.rs
+assertion_line: 682
+expression: "snapshot_view(op(\"delete_certificates\"))"
+---
+{
+  "access": "destructive",
+  "auth_modes": [
+    "api-client",
+    "oauth-client",
+    "service-account"
+  ],
+  "body": "Json",
+  "description": "Up to 100 certificate IDs per call. Deleting cannot be undone.\n\nDestructive: deletes signing certificates with a POST request: profiles issued with them stop working and builds can no longer be signed with them.",
+  "group": "provisioning",
+  "input_schema": {
+    "additionalProperties": false,
+    "properties": {
+      "body": {
+        "description": "Request body: JSON object.",
+        "properties": {
+          "certIds": {
+            "description": "Certificate ID list. Array length: 1–100",
+            "items": {
+              "maxLength": 32,
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "certIds"
+        ],
+        "type": "object"
+      }
+    },
+    "required": [
+      "body"
+    ],
+    "type": "object"
+  },
+  "method": "POST",
+  "operation_id": "provisioning.cert.delete",
+  "params": [
+    {
+      "api_name": "body",
+      "description": "Request body: JSON object.",
+      "location": "Body",
+      "name": "body",
+      "repeated": false,
+      "required": true,
+      "value_type": "Object"
+    }
+  ],
+  "path": "/api/publish/v2/cert/delete",
+  "reference": "https://developer.huawei.com/consumer/en/doc/app/agc-help-provision-api-delete-cent-0000002271000685",
+  "response": "Json",
+  "result": {
+    "code_field": "code",
+    "field": "ret",
+    "message_field": "msg"
+  },
+  "summary": "Deletes signing certificates.",
+  "tool_name": "delete_certificates",
+  "toolset": "provisioning"
+}

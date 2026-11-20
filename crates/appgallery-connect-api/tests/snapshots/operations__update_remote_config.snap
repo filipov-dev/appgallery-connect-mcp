@@ -1,0 +1,410 @@
+---
+source: crates/appgallery-connect-api/tests/operations.rs
+assertion_line: 725
+expression: "snapshot_view(op(\"update_remote_config\"))"
+---
+{
+  "access": "destructive",
+  "auth_modes": [
+    "api-client",
+    "service-account"
+  ],
+  "body": "Json",
+  "description": "The new version takes effect for the users of the app at once: there is no draft and no review. The body describes the whole configuration (configItems and filters as returned by the read operation, with the changes applied); a parameter or condition missing from the body is most likely deleted. version must be the latest version number (0 when the app has no configuration yet): if the configuration was changed after it was read, the request fails with result code 204083201 and nothing is written. The response has the new version number. Rate limit: 5 requests per second and 1000 per hour per IP address.\n\nDestructive: writes a new version of the Remote Configuration from the request body, most likely replacing the whole configuration: it takes effect for the users of the app at once, without a draft or review.\n\nProject-level API client: the server signs this request with the API client of the project given in `productId`, not with its team-level API client. The user adds it with `appgallery-connect-mcp auth project add`.",
+  "group": "remoteconfig",
+  "input_schema": {
+    "additionalProperties": false,
+    "properties": {
+      "appId": {
+        "description": "App ID of an app in the project.",
+        "type": "string"
+      },
+      "body": {
+        "description": "Request body: JSON object.",
+        "properties": {
+          "appName": {
+            "description": "App name in the project.",
+            "maxLength": 128,
+            "type": "string"
+          },
+          "configItems": {
+            "description": "Parameters of the configuration.",
+            "items": {
+              "properties": {
+                "defaultValue": {
+                  "description": "Default value of the parameter.",
+                  "properties": {
+                    "useSdkValue": {
+                      "description": "Use the in-app default value instead of value.",
+                      "type": "boolean"
+                    },
+                    "value": {
+                      "description": "Value of the parameter.",
+                      "type": "string"
+                    }
+                  },
+                  "type": "object"
+                },
+                "desc": {
+                  "description": "Parameter description.",
+                  "type": "string"
+                },
+                "filterValues": {
+                  "description": "Values of the parameter for conditions, by condition name.",
+                  "items": {
+                    "properties": {
+                      "name": {
+                        "description": "Condition name (name of a filter of the configuration).",
+                        "type": "string"
+                      },
+                      "value": {
+                        "description": "Value of the parameter when the condition is met.",
+                        "properties": {
+                          "useSdkValue": {
+                            "description": "Use the in-app default value instead of value.",
+                            "type": "boolean"
+                          },
+                          "value": {
+                            "description": "Value of the parameter.",
+                            "type": "string"
+                          }
+                        },
+                        "type": "object"
+                      }
+                    },
+                    "required": [
+                      "name",
+                      "value"
+                    ],
+                    "type": "object"
+                  },
+                  "type": "array"
+                },
+                "name": {
+                  "description": "Parameter name.",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "name",
+                "defaultValue"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "filters": {
+            "description": "Conditions of the configuration. Which conditions apply depends on the platform of the app (Android, iOS, Web, HarmonyOS).",
+            "items": {
+              "properties": {
+                "browsersVersion": {
+                  "description": "Browser types and versions; up to 64 values.",
+                  "items": {
+                    "properties": {
+                      "operator": {
+                        "description": "Operator: or.",
+                        "type": "string"
+                      },
+                      "values": {
+                        "description": "Browser types and versions; up to 10 values.",
+                        "items": {
+                          "properties": {
+                            "operator": {
+                              "description": "Operator: LESS_THAN, EQUAL, LESS_EQUAL, NOT_EQUAL, GREATER_THAN or GREATER_EQUAL.",
+                              "type": "string"
+                            },
+                            "systemName": {
+                              "description": "Browser name.",
+                              "type": "string"
+                            },
+                            "value": {
+                              "description": "Browser version number.",
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "operator"
+                          ],
+                          "type": "object"
+                        },
+                        "type": "array"
+                      }
+                    },
+                    "required": [
+                      "operator"
+                    ],
+                    "type": "object"
+                  },
+                  "type": "array"
+                },
+                "country": {
+                  "description": "Country or region.",
+                  "properties": {
+                    "values": {
+                      "description": "Country or region codes, like RU, DE, CN; up to 256 values.",
+                      "items": {
+                        "type": "string"
+                      },
+                      "type": "array"
+                    }
+                  },
+                  "required": [
+                    "values"
+                  ],
+                  "type": "object"
+                },
+                "dateTimes": {
+                  "description": "Date and time; up to two values.",
+                  "items": {
+                    "properties": {
+                      "dateTime": {
+                        "description": "Time in milliseconds since 1970-01-01 00:00:00 UTC; the later time must be after the earlier one.",
+                        "items": {
+                          "type": "string"
+                        },
+                        "type": "array"
+                      },
+                      "operator": {
+                        "description": "Operator: LESS_THAN (earlier than) or GREATER_EQUAL (later than).",
+                        "type": "string"
+                      },
+                      "timeZone": {
+                        "description": "Time zone in the form UTC+HH:MM or with a minus sign, like UTC+03:00 or UTC+05:45.",
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "operator",
+                      "timeZone"
+                    ],
+                    "type": "object"
+                  },
+                  "type": "array"
+                },
+                "desc": {
+                  "description": "Condition description.",
+                  "type": "string"
+                },
+                "deviceChip": {
+                  "description": "Chipset model.",
+                  "properties": {
+                    "operator": {
+                      "description": "Operator: CONTAINS (includes), NOT_CONTAINS (excludes), IN (equals) or REGEX (regular expression).",
+                      "type": "string"
+                    },
+                    "values": {
+                      "description": "Chipset models; up to 64 values, one value with REGEX.",
+                      "items": {
+                        "type": "string"
+                      },
+                      "type": "array"
+                    }
+                  },
+                  "required": [
+                    "operator",
+                    "values"
+                  ],
+                  "type": "object"
+                },
+                "language": {
+                  "description": "Language.",
+                  "properties": {
+                    "values": {
+                      "description": "Language codes, like en, ru, zh_Hans; up to 256 values.",
+                      "items": {
+                        "type": "string"
+                      },
+                      "type": "array"
+                    }
+                  },
+                  "required": [
+                    "values"
+                  ],
+                  "type": "object"
+                },
+                "name": {
+                  "description": "Condition name.",
+                  "type": "string"
+                },
+                "osVersion": {
+                  "description": "OS version.",
+                  "properties": {
+                    "operator": {
+                      "description": "Operator: CONTAINS (includes), NOT_CONTAINS (excludes), IN (equals) or REGEX (regular expression).",
+                      "type": "string"
+                    },
+                    "values": {
+                      "description": "Versions; up to 64 values, one value with REGEX.",
+                      "items": {
+                        "type": "string"
+                      },
+                      "type": "array"
+                    }
+                  },
+                  "required": [
+                    "operator",
+                    "values"
+                  ],
+                  "type": "object"
+                },
+                "systemVersion": {
+                  "description": "OS types and versions; up to 64 values.",
+                  "items": {
+                    "properties": {
+                      "operator": {
+                        "description": "Operator: or.",
+                        "type": "string"
+                      },
+                      "values": {
+                        "description": "OS types and versions; up to 10 values.",
+                        "items": {
+                          "properties": {
+                            "operator": {
+                              "description": "Operator: LESS_THAN, EQUAL, LESS_EQUAL, NOT_EQUAL, GREATER_THAN or GREATER_EQUAL.",
+                              "type": "string"
+                            },
+                            "systemName": {
+                              "description": "OS name.",
+                              "type": "string"
+                            },
+                            "value": {
+                              "description": "OS version number.",
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "operator"
+                          ],
+                          "type": "object"
+                        },
+                        "type": "array"
+                      }
+                    },
+                    "required": [
+                      "operator"
+                    ],
+                    "type": "object"
+                  },
+                  "type": "array"
+                },
+                "userRatio": {
+                  "description": "Percentage of users; up to 64 values.",
+                  "items": {
+                    "properties": {
+                      "operator": {
+                        "description": "Operator: LESS_EQUAL (<=) or GREATER_THAN (>).",
+                        "type": "string"
+                      },
+                      "randomValue": {
+                        "description": "Random number that maps app instances to the percentage scale; default: default. Use a different random number for an independent split.",
+                        "type": "string"
+                      },
+                      "value": {
+                        "description": "Share of users multiplied by 100000000, from 1 to 100000000: 2% is 2000000.",
+                        "type": "integer"
+                      }
+                    },
+                    "required": [
+                      "operator",
+                      "value"
+                    ],
+                    "type": "object"
+                  },
+                  "type": "array"
+                },
+                "versionName": {
+                  "description": "App version name.",
+                  "properties": {
+                    "operator": {
+                      "description": "Operator: CONTAINS (includes), NOT_CONTAINS (excludes), IN (equals) or REGEX (regular expression).",
+                      "type": "string"
+                    },
+                    "values": {
+                      "description": "Versions; up to 64 values, one value with REGEX.",
+                      "items": {
+                        "type": "string"
+                      },
+                      "type": "array"
+                    }
+                  },
+                  "required": [
+                    "operator",
+                    "values"
+                  ],
+                  "type": "object"
+                }
+              },
+              "required": [
+                "name"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "version": {
+            "description": "Latest version number of the configuration as read; 0 for the first version.",
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "version"
+        ],
+        "type": "object"
+      },
+      "productId": {
+        "description": "Project ID. The request is signed with the project-level API client of this project.",
+        "type": "string"
+      }
+    },
+    "required": [
+      "productId",
+      "appId",
+      "body"
+    ],
+    "type": "object"
+  },
+  "method": "PUT",
+  "operation_id": "remoteconfig.config.update",
+  "params": [
+    {
+      "api_name": "productId",
+      "description": "Project ID. The request is signed with the project-level API client of this project.",
+      "location": "Header",
+      "name": "productId",
+      "repeated": false,
+      "required": true,
+      "value_type": "String"
+    },
+    {
+      "api_name": "appId",
+      "description": "App ID of an app in the project.",
+      "location": "Header",
+      "name": "appId",
+      "repeated": false,
+      "required": true,
+      "value_type": "String"
+    },
+    {
+      "api_name": "body",
+      "description": "Request body: JSON object.",
+      "location": "Body",
+      "name": "body",
+      "repeated": false,
+      "required": true,
+      "value_type": "Object"
+    }
+  ],
+  "path": "/api/remote-config/v1/config",
+  "project_param": "productId",
+  "reference": "https://developer.huawei.com/consumer/en/doc/development/AppGallery-connect-References/server-rest-modify-0000001182418015",
+  "response": "Json",
+  "result": {
+    "code_field": "code",
+    "field": "ret",
+    "message_field": "msg"
+  },
+  "summary": "Writes a new version of the Remote Configuration of an app: all parameters and conditions.",
+  "tool_name": "update_remote_config",
+  "toolset": "remote-config"
+}

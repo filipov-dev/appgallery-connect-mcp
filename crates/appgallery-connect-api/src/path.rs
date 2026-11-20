@@ -109,6 +109,21 @@ pub fn validate_api_path(path: &str) -> Result<(), ApiError> {
     Ok(())
 }
 
+/// Проверяет путь операции сервиса HMS IAP ([`crate::service::ApiService`]): те же
+/// требования к символам и сегментам, что у [`validate_api_path`], но без префикса
+/// `/api/` (пути IAP — `/applications/…` и `/sub/applications/…`). Префикс `/api/` здесь
+/// отклоняется: такие пути — у AppGallery Connect API.
+pub fn validate_service_path(path: &str) -> Result<(), ApiError> {
+    if !path.starts_with('/') || path.starts_with(API_PREFIX) || path.starts_with("//") {
+        return Err(ApiError::InvalidPath(format!(
+            "a path of an HMS IAP operation starts with `/` and not with `/api/`: `{}`",
+            shorten(path)
+        )));
+    }
+    // Остальные проверки — как у пути Connect API под префиксом `/api`.
+    validate_api_path(&format!("/api{path}"))
+}
+
 /// Подставляет параметры в шаблон пути операции и проверяет результат через
 /// [`validate_api_path`].
 ///
@@ -423,5 +438,26 @@ mod tests {
         }
         // Значение параметра не может увести запрос в раздел токенов.
         assert!(render_path("/api/{x}/v1/token", |_| Some("oauth2".into())).is_err());
+    }
+
+    #[test]
+    fn service_paths_have_no_api_prefix() {
+        for path in [
+            "/applications/purchases/tokens/verify",
+            "/sub/applications/v2/purchases/get",
+        ] {
+            validate_service_path(path).unwrap();
+        }
+        for path in [
+            "/api/publish/v2/app-info",
+            "applications/x",
+            "//evil.example/x",
+            "/applications/../api/x",
+            "/applications/%2e%2e/x",
+            "/applications/x?y=1",
+            "https://evil.example/x",
+        ] {
+            assert!(validate_service_path(path).is_err(), "{path}");
+        }
     }
 }

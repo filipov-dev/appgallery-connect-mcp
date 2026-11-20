@@ -11,7 +11,8 @@
 //! ([`TokenSource::invalidate`]) и вырезает известные токены из текстов
 //! ([`TokenSource::known_tokens`]). [`ApiClientTokens`] держит токен в памяти процесса и
 //! заменяет его, когда до истечения остаётся меньше [`REFRESH_MARGIN`]; параллельные
-//! запросы ждут одного обновления. [`StaticToken`] — заранее известный токен (тесты).
+//! запросы ждут одного обновления (общий кэш [`TokenCache`] — и у входа пользователя,
+//! [`crate::user_oauth::UserTokens`]). [`StaticToken`] — заранее известный токен (тесты).
 //!
 //! Токен хранится в [`Zeroizing`], его `Debug` и `Display` не раскрывают значение; секрет
 //! клиента и токен не попадают в тексты ошибок и логи. Время берётся из [`Clock`]: тесты
@@ -108,7 +109,7 @@ impl Clock for ManualClock {
 
 /// Блокировка без паники: под блокировками этого модуля нет кода, который паникует, поэтому
 /// отравление не означает испорченных данных.
-fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
+pub(crate) fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
     mutex
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner())
@@ -156,6 +157,17 @@ pub enum TokenError {
         /// Текст Huawei, обрезанный и без секретов.
         message: String,
     },
+    /// Huawei OAuth отказал в токене уровня приложения ([`crate::app::AppTokens`]):
+    /// неверный секрет приложения, неверный client ID и т. п.
+    #[error("{}", describe_app_rejection(.app_id, *.status, .code.as_deref(), .message))]
+    AppRejected {
+        app_id: String,
+        status: u16,
+        /// Код Huawei OAuth (`error` и `sub_error`), если он есть.
+        code: Option<String>,
+        /// Текст Huawei, обрезанный и без секретов.
+        message: String,
+    },
     /// Ответ не похож на ответ метода получения токена.
     #[error("the AppGallery Connect token endpoint returned an unexpected response: {0}")]
     InvalidResponse(String),
@@ -165,6 +177,10 @@ pub enum TokenError {
     /// Некорректная настройка источника токенов.
     #[error("invalid token source configuration: {0}")]
     Config(String),
+    /// Отказ сервера входа HUAWEI ID (OAuth-клиент): текст уже с кодом, пояснением и
+    /// подсказкой, без секретов.
+    #[error("{0}")]
+    SignIn(String),
 }
 
 fn describe_rejection(status: u16, code: Option<&str>, message: &str) -> String {
@@ -182,6 +198,25 @@ fn describe_rejection(status: u16, code: Option<&str>, message: &str) -> String 
         ". Check the client ID and secret of the API client (AppGallery Connect > Users and \
          permissions > API key > Connect API), that the client has not been deleted and that \
          the region of the profile matches the account.",
+    );
+    text
+}
+
+fn describe_app_rejection(app_id: &str, status: u16, code: Option<&str>, message: &str) -> String {
+    let mut text = format!("Huawei OAuth rejected the app secret of app `{app_id}` (HTTP {status}");
+    if let Some(code) = code {
+        text.push_str(", code ");
+        text.push_str(code);
+    }
+    text.push(')');
+    if !message.is_empty() {
+        text.push_str(": ");
+        text.push_str(message);
+    }
+    text.push_str(
+        ". Check the client ID and client secret of the app (AppGallery Connect > My apps > the \
+         app > App information, or All services > In-App Purchases) and that the secret has \
+         not been reset.",
     );
     text
 }
@@ -207,15 +242,13 @@ struct Cached {
     expires_at: SystemTime,
 }
 
-/// Токены API-клиента: получение у AppGallery Connect и кэш в памяти.
+/// Кэш access token в памяти процесса: общая часть источников токенов API-клиента и входа
+/// пользователя.
 ///
 /// Токен заменяется, когда до истечения остаётся меньше запаса ([`REFRESH_MARGIN`]) или
 /// часы отвели назад раньше времени получения. Обновление идёт под асинхронной
 /// блокировкой: параллельные запросы ждут его и получают тот же новый токен.
-pub struct ApiClientTokens {
-    http: reqwest::Client,
-    url: url::Url,
-    credentials: ApiClientCredentials,
+pub(crate) struct TokenCache {
     clock: Arc<dyn Clock>,
     refresh_margin: Duration,
     cache: tokio::sync::Mutex<Option<Cached>>,
@@ -224,12 +257,100 @@ pub struct ApiClientTokens {
     remembered: Mutex<Vec<AccessToken>>,
 }
 
+impl TokenCache {
+    pub(crate) fn new() -> Self {
+        Self {
+            clock: Arc::new(SystemClock),
+            refresh_margin: REFRESH_MARGIN,
+            cache: tokio::sync::Mutex::new(None),
+            remembered: Mutex::new(Vec::new()),
+        }
+    }
+
+    pub(crate) fn set_clock(&mut self, clock: Arc<dyn Clock>) {
+        self.clock = clock;
+    }
+
+    pub(crate) fn set_refresh_margin(&mut self, margin: Duration) {
+        self.refresh_margin = margin;
+    }
+
+    pub(crate) fn refresh_margin(&self) -> Duration {
+        self.refresh_margin
+    }
+
+    fn fresh(&self, cached: &Cached, now: SystemTime) -> bool {
+        now >= cached.obtained_at
+            && now
+                .checked_add(self.refresh_margin)
+                .is_some_and(|deadline| deadline < cached.expires_at)
+    }
+
+    /// Действующий токен из памяти или новый от `fetch` (токен и срок жизни).
+    pub(crate) async fn get<F, Fut>(&self, fetch: F) -> Result<AccessToken, TokenError>
+    where
+        F: FnOnce() -> Fut,
+        Fut: Future<Output = Result<(AccessToken, Duration), TokenError>>,
+    {
+        let mut cache = self.cache.lock().await;
+        let now = self.clock.now();
+        if let Some(cached) = cache.as_ref()
+            && self.fresh(cached, now)
+        {
+            return Ok(cached.token.clone());
+        }
+        let (token, expires_in) = fetch().await?;
+        let lifetime = expires_in.min(MAX_TOKEN_LIFETIME);
+        {
+            let mut remembered = lock(&self.remembered);
+            remembered.push(token.clone());
+            if remembered.len() > REMEMBERED_TOKENS {
+                remembered.remove(0);
+            }
+        }
+        *cache = Some(Cached {
+            token: token.clone(),
+            obtained_at: now,
+            expires_at: now.checked_add(lifetime).unwrap_or(now),
+        });
+        tracing::debug!(
+            lifetime_secs = lifetime.as_secs(),
+            "obtained an AppGallery Connect access token"
+        );
+        Ok(token)
+    }
+
+    /// Сбрасывает токен, если он всё ещё текущий (см. [`TokenSource::invalidate`]).
+    pub(crate) async fn invalidate(&self, rejected: &AccessToken) {
+        let mut cache = self.cache.lock().await;
+        if cache
+            .as_ref()
+            .is_some_and(|cached| &cached.token == rejected)
+        {
+            *cache = None;
+        }
+    }
+
+    /// Текущий и недавние прежние токены.
+    pub(crate) fn remembered(&self) -> Vec<AccessToken> {
+        lock(&self.remembered).clone()
+    }
+}
+
+/// Токены API-клиента: получение у AppGallery Connect и кэш в памяти ([`TokenCache`]).
+pub struct ApiClientTokens {
+    http: reqwest::Client,
+    url: url::Url,
+    credentials: ApiClientCredentials,
+    cache: TokenCache,
+}
+
 impl fmt::Debug for ApiClientTokens {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("ApiClientTokens")
             .field("host", &self.url.host_str())
             .field("credentials", &self.credentials)
-            .field("refresh_margin", &self.refresh_margin)
+            .field("refresh_margin", &self.cache.refresh_margin())
             .finish_non_exhaustive()
     }
 }
@@ -261,64 +382,25 @@ impl ApiClientTokens {
             http,
             url,
             credentials,
-            clock: Arc::new(SystemClock),
-            refresh_margin: REFRESH_MARGIN,
-            cache: tokio::sync::Mutex::new(None),
-            remembered: Mutex::new(Vec::new()),
+            cache: TokenCache::new(),
         })
     }
 
     /// Заменяет часы (тесты).
     pub fn with_clock(mut self, clock: Arc<dyn Clock>) -> Self {
-        self.clock = clock;
+        self.cache.set_clock(clock);
         self
     }
 
     /// Заменяет запас времени, за который токен обновляется до истечения.
     pub fn with_refresh_margin(mut self, margin: Duration) -> Self {
-        self.refresh_margin = margin;
+        self.cache.set_refresh_margin(margin);
         self
     }
 
     /// Учётные данные, по которым выпускаются токены.
     pub fn credentials(&self) -> &ApiClientCredentials {
         &self.credentials
-    }
-
-    fn fresh(&self, cached: &Cached, now: SystemTime) -> bool {
-        now >= cached.obtained_at
-            && now
-                .checked_add(self.refresh_margin)
-                .is_some_and(|deadline| deadline < cached.expires_at)
-    }
-
-    async fn current(&self) -> Result<AccessToken, TokenError> {
-        let mut cache = self.cache.lock().await;
-        let now = self.clock.now();
-        if let Some(cached) = cache.as_ref()
-            && self.fresh(cached, now)
-        {
-            return Ok(cached.token.clone());
-        }
-        let (token, expires_in) = self.fetch().await?;
-        let lifetime = expires_in.min(MAX_TOKEN_LIFETIME);
-        {
-            let mut remembered = lock(&self.remembered);
-            remembered.push(token.clone());
-            if remembered.len() > REMEMBERED_TOKENS {
-                remembered.remove(0);
-            }
-        }
-        *cache = Some(Cached {
-            token: token.clone(),
-            obtained_at: now,
-            expires_at: now.checked_add(lifetime).unwrap_or(now),
-        });
-        tracing::debug!(
-            lifetime_secs = lifetime.as_secs(),
-            "obtained an AppGallery Connect access token"
-        );
-        Ok(token)
     }
 
     /// Запрашивает новый токен. Тело запроса с секретом затирается после отправки копии.
@@ -411,23 +493,15 @@ impl ApiClientTokens {
 
 impl TokenSource for ApiClientTokens {
     fn token(&self) -> BoxFuture<'_, Result<AccessToken, TokenError>> {
-        Box::pin(self.current())
+        Box::pin(self.cache.get(|| self.fetch()))
     }
 
     fn invalidate<'a>(&'a self, rejected: &'a AccessToken) -> BoxFuture<'a, ()> {
-        Box::pin(async move {
-            let mut cache = self.cache.lock().await;
-            if cache
-                .as_ref()
-                .is_some_and(|cached| &cached.token == rejected)
-            {
-                *cache = None;
-            }
-        })
+        Box::pin(self.cache.invalidate(rejected))
     }
 
     fn known_tokens(&self) -> Vec<AccessToken> {
-        lock(&self.remembered).clone()
+        self.cache.remembered()
     }
 }
 

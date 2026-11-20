@@ -58,6 +58,31 @@ slug = "provisioning"
 title = "Provisioning API"
 reference = "https://developer.huawei.com/consumer/en/doc/app/agc-help-provision-api-reference-0000002236041494"
 
+[[groups]]
+slug = "remoteconfig"
+title = "Remote Configuration"
+reference = "https://developer.huawei.com/consumer/en/doc/development/AppGallery-connect-References/server-rest-config-0000001182298101"
+
+[[groups]]
+slug = "applinking"
+title = "App Linking"
+reference = "https://developer.huawei.com/consumer/en/doc/development/AppGallery-connect-References/apirest-0000001141396584"
+
+[[groups]]
+slug = "orders"
+title = "IAP Order Service"
+reference = "https://developer.huawei.com/consumer/en/doc/development/HMSCore-References/api-common-statement-0000001050986127"
+
+[[groups]]
+slug = "subscriptions"
+title = "IAP Subscription Service"
+reference = "https://developer.huawei.com/consumer/en/doc/development/HMSCore-References/api-common-statement-0000001050986127"
+
+[[groups]]
+slug = "iapkit"
+title = "HarmonyOS IAP Kit server API"
+reference = "https://developer.huawei.com/consumer/en/doc/harmonyos-references/iap-rest-common-statement"
+
 # ---------------------------------------------------------------------------
 # Наборы инструментов (--toolsets) в порядке вывода. Каждая операция входит ровно в один
 # набор; вне наборов — только исключённые операции с `callable = false`.
@@ -148,7 +173,7 @@ operations = [
 
 [[toolsets]]
 slug = "projects"
-description = "Projects (Project Management API): teams, projects and their apps, brief app information, enabled services, the app configuration file, signing certificate fingerprints. The Huawei reference describes these operations only for OAuth clients and service accounts: with the API client of this server they may fail with a permission error."
+description = "Projects (Project Management API): teams, projects and their apps, brief app information, enabled services, the app configuration file, signing certificate fingerprints. The Huawei reference describes these operations only for OAuth clients (a user sign-in) and service accounts: with an API client they may fail with a permission error."
 operations = [
     "project.team.list",
     "project.project.list",
@@ -162,7 +187,7 @@ operations = [
 
 [[toolsets]]
 slug = "provisioning"
-description = "HarmonyOS signing (Provisioning API): signing certificates, debugging and testing devices, provisioning profiles."
+description = "HarmonyOS signing (Provisioning API): signing certificates (requested from a local CSR file with certificate_request), debugging and testing devices, provisioning profiles and their devices; certificate and profile files are saved with save_to."
 default = false
 operations = [
     "provisioning.cert.list",
@@ -175,6 +200,42 @@ operations = [
     "provisioning.profile.create",
     "provisioning.profile.updateDevices",
     "provisioning.profile.delete",
+]
+
+[[toolsets]]
+slug = "remote-config"
+description = "Remote Configuration: parameters, conditions and versions of the Remote Configuration of an app, changing parameters with remote_config_set, rolling back to an earlier version. Requests are signed with the project-level API client of the project (`auth project add`); a change takes effect for the users of the app at once."
+default = false
+operations = [
+    "remoteconfig.config.get",
+    "remoteconfig.version.list",
+    "remoteconfig.config.update",
+    "remoteconfig.config.rollback",
+]
+
+[[toolsets]]
+slug = "app-linking"
+description = "App Linking: create short links of cross-platform links and unified download links of a project; needs the project-level API client of the project. Links created through the API are public, are not shown in AppGallery Connect and cannot be listed or deleted through the API."
+default = false
+operations = [
+    "applinking.link.create",
+    "applinking.unifiedLink.create",
+]
+
+[[toolsets]]
+slug = "purchases"
+description = "In-app purchases (HMS IAP Order and Subscription services): verify purchase tokens, confirm delivery of consumables, list canceled and refunded purchases and orders, check, cancel, defer, refund and revoke subscriptions. Requests are signed with the app secret of the app (appId argument), not with the API client."
+default = false
+operations = [
+    "orders.purchaseToken.verify",
+    "orders.purchase.confirm",
+    "orders.cancelledPurchase.list",
+    "orders.merchantOrder.list",
+    "subscriptions.purchase.get",
+    "subscriptions.purchase.stop",
+    "subscriptions.purchase.delay",
+    "subscriptions.purchase.returnFee",
+    "subscriptions.purchase.withdraw",
 ]
 
 # ---------------------------------------------------------------------------
@@ -234,7 +295,6 @@ operations = [
 "pms.promotion.batchActivate" = "release_promotions"
 "pms.promotion.batchDeactivate" = "remove_promotions"
 
-"provisioning.cert.create" = "create_certificate"
 "provisioning.cert.list" = "list_certificates"
 "provisioning.cert.delete" = "delete_certificates"
 "provisioning.device.add" = "add_devices"
@@ -245,6 +305,24 @@ operations = [
 "provisioning.profile.updateDevices" = "update_profile_devices"
 "provisioning.profile.delete" = "delete_profile"
 
+"remoteconfig.config.get" = "get_remote_config"
+"remoteconfig.version.list" = "list_remote_config_versions"
+"remoteconfig.config.update" = "update_remote_config"
+"remoteconfig.config.rollback" = "rollback_remote_config"
+
+"applinking.link.create" = "create_short_link"
+"applinking.unifiedLink.create" = "create_unified_link"
+
+"orders.purchaseToken.verify" = "verify_product_purchase"
+"orders.purchase.confirm" = "confirm_product_purchase"
+"orders.cancelledPurchase.list" = "list_cancelled_purchases"
+"orders.merchantOrder.list" = "list_iap_orders"
+"subscriptions.purchase.get" = "get_subscription_purchase"
+"subscriptions.purchase.stop" = "cancel_subscription"
+"subscriptions.purchase.delay" = "defer_subscription"
+"subscriptions.purchase.returnFee" = "refund_subscription"
+"subscriptions.purchase.withdraw" = "revoke_subscription"
+
 # ---------------------------------------------------------------------------
 # Уровни доступа.
 #
@@ -253,7 +331,10 @@ operations = [
 #
 # - destructive: действия с последствиями для пользователей AppGallery и денег —
 #   отправка на проверку, поэтапный выпуск и время выпуска, публичные ответы на отзывы,
-#   товары и цены, акции, удаление сертификатов и устройств запросом POST;
+#   товары и цены, акции, удаление сертификатов и устройств запросом POST, запись и
+#   откат Remote Configuration (новая версия сразу действует для пользователей),
+#   операции HMS IAP с покупками пользователей (подтверждение доставки, отмена,
+#   отсрочка, возврат и отзыв подписки);
 # - write: GET, который выдаёт право записи;
 # - read: POST, который только читает.
 #
@@ -303,13 +384,23 @@ operations = ["pms.promotion.batchActivate", "pms.promotion.batchDeactivate"]
 
 [[access]]
 level = "destructive"
-reason = "deletes signing certificates with a POST request; this cannot be undone."
+reason = "deletes signing certificates with a POST request: profiles issued with them stop working and builds can no longer be signed with them."
 operations = ["provisioning.cert.delete"]
 
 [[access]]
 level = "destructive"
-reason = "deletes registered devices with a POST request; this cannot be undone."
+reason = "deletes registered debugging and testing devices with a POST request: debug profiles and profiles for specific devices can no longer include them, so builds for these devices cannot be signed until the devices are added again."
 operations = ["provisioning.device.delete"]
+
+[[access]]
+level = "destructive"
+reason = "writes a new version of the Remote Configuration from the request body, most likely replacing the whole configuration: it takes effect for the users of the app at once, without a draft or review."
+operations = ["remoteconfig.config.update"]
+
+[[access]]
+level = "destructive"
+reason = "makes an earlier version of the Remote Configuration the current one: it takes effect for the users of the app at once."
+operations = ["remoteconfig.config.rollback"]
 
 [[access]]
 level = "write"
@@ -325,6 +416,68 @@ operations = [
     "pms.promotion.search",
     "provisioning.cert.list",
 ]
+
+[[access]]
+level = "read"
+reason = "the POST request of HMS IAP only reads purchase data."
+operations = [
+    "orders.purchaseToken.verify",
+    "orders.cancelledPurchase.list",
+    "orders.merchantOrder.list",
+    "subscriptions.purchase.get",
+]
+
+[[access]]
+level = "destructive"
+reason = "marks the purchase of a consumable as delivered: this cannot be undone, and the user can buy the product again."
+operations = ["orders.purchase.confirm"]
+
+[[access]]
+level = "destructive"
+reason = "stops the renewal of the user's subscription; it stays valid until the end of the paid period."
+operations = ["subscriptions.purchase.stop"]
+
+[[access]]
+level = "destructive"
+reason = "moves the next billing date of the user's subscription: the user gets the service free of charge until then."
+operations = ["subscriptions.purchase.delay"]
+
+[[access]]
+level = "destructive"
+reason = "refunds the user's latest subscription payment; this cannot be undone."
+operations = ["subscriptions.purchase.returnFee"]
+
+[[access]]
+level = "destructive"
+reason = "revokes the user's subscription at once and refunds its latest payment; this cannot be undone."
+operations = ["subscriptions.purchase.withdraw"]
+
+[[access]]
+level = "read"
+reason = "POST that only reads orders, subscriptions or notification records."
+operations = [
+    "iapkit.orderStatus.query",
+    "iapkit.tradeOrders.query",
+    "iapkit.subscriptionStatus.query",
+    "iapkit.order.lookup",
+    "iapkit.userOrders.query",
+    "iapkit.notifications.query",
+]
+
+[[access]]
+level = "destructive"
+reason = "acknowledges delivery of a user's purchase or subscription; each order can be acknowledged only once."
+operations = ["iapkit.orderDelivery.confirm", "iapkit.subscriptionDelivery.confirm"]
+
+[[access]]
+level = "destructive"
+reason = "moves the renewal date of a user's subscription: the user gets days without charge."
+operations = ["iapkit.subscriptionRenewal.postpone"]
+
+[[access]]
+level = "destructive"
+reason = "answers a user's refund request; an approved refund returns money to the user."
+operations = ["iapkit.refundResult.send"]
 
 # ---------------------------------------------------------------------------
 # Исключённые операции: не регистрируются как инструменты, но находятся поиском по
@@ -355,6 +508,34 @@ operations = ["upload.file.put", "upload.chunk.put"]
 callable = false
 reason = "Not a Connect API call: the file content is sent to the storage URL from the upload URL response."
 alternative = "Use package_upload for an app package or image_sync for the icon, screenshots and videos: they send the file to the storage themselves."
+
+[[exclude]]
+operations = ["provisioning.cert.create"]
+callable = false
+reason = "Takes the certificate signing request (CSR) as text in the request body; the server takes the CSR only from a local file, checks it and never sends a private key, so the operation is not called directly or through api_request."
+alternative = "Use certificate_request: it reads the CSR from a local file, requests the certificate and saves the certificate file with save_to."
+
+# REST API IAP Kit (HarmonyOS 5 и новее): запросы подписываются JWT ES256 ключом IAP Kit
+# (.p8, Key ID, Issuer ID), ответы — JWS с цепочкой сертификатов до Huawei CBG Root CA G2.
+# Ни хранения такого ключа, ни проверки JWS в сервере пока нет, поэтому операции только
+# находятся поиском и не вызываются даже через api_request.
+[[exclude]]
+operations = [
+    "iapkit.orderStatus.query",
+    "iapkit.orderDelivery.confirm",
+    "iapkit.tradeOrders.query",
+    "iapkit.subscriptionStatus.query",
+    "iapkit.subscriptionDelivery.confirm",
+    "iapkit.subscriptionRenewal.postpone",
+    "iapkit.order.lookup",
+    "iapkit.userOrders.query",
+    "iapkit.notifications.query",
+    "iapkit.notifications.test",
+    "iapkit.refundResult.send",
+]
+callable = false
+reason = "HarmonyOS IAP Kit server API (apps on HarmonyOS 5 and later). Its requests are signed with an ES256 JWT made from an IAP Kit key (a .p8 private key with its key ID and issuer ID) and its responses are JWS that must be verified against the Huawei CBG Root CA G2 certificate. This server does not store IAP Kit keys or verify such responses yet, so the operation cannot be called, not even through api_request."
+alternative = "For purchases made through HMS IAP (Android apps, HarmonyOS 4 and earlier) use the purchases toolset: verify_product_purchase, get_subscription_purchase and the other tools. For HarmonyOS 5 apps call this API from the app's own server."
 
 # ---------------------------------------------------------------------------
 # Поля ответов с секретами и временными ссылками. Сервер заменяет их значения на "***"
@@ -397,12 +578,6 @@ fields = ["fileURL"]
 [[secrets]]
 kind = "download-url"
 description = "a temporary link to the certificate file, valid for about five minutes"
-operations = ["provisioning.cert.create"]
-fields = ["certInfo.certDownloadUrl"]
-
-[[secrets]]
-kind = "download-url"
-description = "a temporary link to the certificate file, valid for about five minutes"
 hint = "save_to saves one file: narrow the list to one certificate with certIds in body."
 operations = ["provisioning.cert.list"]
 fields = ["certInfo[].certDownloadUrl", "certList[].certDownloadUrl"]
@@ -410,6 +585,7 @@ fields = ["certInfo[].certDownloadUrl", "certList[].certDownloadUrl"]
 [[secrets]]
 kind = "download-url"
 description = "a temporary link to the provisioning profile file"
+hint = "The link is valid only for a short time: pass save_to in the same call; list_profiles with provisionId gives a new link later."
 operations = ["provisioning.profile.create", "provisioning.profile.updateDevices"]
 fields = ["provisionInfo.provisionDownloadUrl"]
 
@@ -419,3 +595,45 @@ description = "a temporary link to the provisioning profile file"
 hint = "save_to saves one file: narrow the list to one profile with provisionId."
 operations = ["provisioning.profile.list"]
 fields = ["provisionList[].provisionDownloadUrl"]
+
+# ---------------------------------------------------------------------------
+# Операции с API-клиентом уровня проекта.
+#
+# Серверные API сервисов проекта (Remote Configuration, App Linking, Auth Service) в
+# режиме API-клиента принимают только клиента уровня проекта, а клиента команды, с
+# которым работает сервер, отклоняют. Операции из `operations` и все операции групп из
+# `groups` исполнитель подписывает клиентом проекта, которого пользователь добавил в
+# профиль (`auth project add`). Проект берётся из аргумента `param`, а без ключа — из
+# того из `productId` и `projectId`, который есть у операции; параметр должен быть
+# обязательным. Операция, для которой справочник называет режимы авторизации без
+# `api-client`, сюда не входит.
+#
+# Операции Project Management API сюда не входят: справочник описывает их только для
+# OAuth-клиента и Service Account.
+# ---------------------------------------------------------------------------
+
+# Remote Configuration: Project ID — заголовок productId всех четырёх операций.
+[[project_credentials]]
+groups = ["remoteconfig"]
+param = "productId"
+
+# App Linking: Project ID — заголовок productId обеих операций.
+[[project_credentials]]
+groups = ["applinking"]
+param = "productId"
+
+# ---------------------------------------------------------------------------
+# Поля ответа, которые сервер убирает из ответа агенту.
+#
+# reason — почему поля нет (английский текст для агента: попадает в пометку `note`
+# ответа и в описание инструмента). fields — пути, как в [[secrets]]; генератор сверяет
+# их со схемой ответа снимка.
+#
+# Поля-строки с JSON внутри (у HMS IAP) отмечены в снимке расширением `x-agc-json`:
+# сервер разбирает их в объекты сам, здесь их перечислять не нужно.
+# ---------------------------------------------------------------------------
+
+[[omit]]
+reason = "the signature covers the original JSON string of the purchase data, which the server parses into an object, so it cannot be verified from this response. A backend that verifies signatures calls the IAP service itself."
+operations = ["orders.purchaseToken.verify", "subscriptions.purchase.get"]
+fields = ["dataSignature", "signatureAlgorithm"]

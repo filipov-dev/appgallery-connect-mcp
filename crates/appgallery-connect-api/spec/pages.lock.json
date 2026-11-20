@@ -11,6 +11,26 @@
       "catalog": "app",
       "anchor": "agc-help-connect-api-introduction-0000002270974725",
       "root": "AppGallery Connect API"
+    },
+    {
+      "catalog": "AppGallery-connect-References",
+      "anchor": "agcapi-app-submit-0000001158245061",
+      "root": "Remote Configuration / Server / REST API"
+    },
+    {
+      "catalog": "AppGallery-connect-References",
+      "anchor": "agcapi-app-submit-0000001158245061",
+      "root": "App Linking / Server / REST"
+    },
+    {
+      "catalog": "HMSCore-References",
+      "anchor": "api-common-statement-0000001050986127",
+      "root": "Server"
+    },
+    {
+      "catalog": "harmonyos-references",
+      "anchor": "iap-rest-common-statement",
+      "root": "IAP Kit / REST API"
     }
   ],
   "pages": [
@@ -1098,6 +1118,419 @@
       "group": "appendix",
       "catalog": "app",
       "sha256": "eedfdc038c141ec81313d8803cfe25ba654bb63dce5b2ceea1dcf12edb7a7855"
+    },
+    {
+      "id": "server-rest-config-0000001182298101",
+      "title": "Querying Configuration Information",
+      "group": "remoteconfig",
+      "catalog": "AppGallery-connect-References",
+      "sha256": "56305d9ea4ec89c1220c137495b69669770212f2561ebf032b2372d7a326d7bd"
+    },
+    {
+      "id": "server-rest-modify-0000001182418015",
+      "title": "Creating and Modifying Configuration Information",
+      "group": "remoteconfig",
+      "catalog": "AppGallery-connect-References",
+      "sha256": "fe7787b98710cf81e633678a85cbb5a9fb5e976884439b746fca2c80f65d469f"
+    },
+    {
+      "id": "server-rest-versions-0000001136178514",
+      "title": "Querying Configurations of Historical Versions",
+      "group": "remoteconfig",
+      "catalog": "AppGallery-connect-References",
+      "sha256": "0ccea7da2175d8b71126c626f742ca49a8ca6706ec444982e84ee8c58b780f7f"
+    },
+    {
+      "id": "server-rest-rollback-0000001136018714",
+      "title": "Rolling Back to an Earlier Configuration",
+      "group": "remoteconfig",
+      "catalog": "AppGallery-connect-References",
+      "sha256": "1ee9f7863728dde836a137f1b1c30d0ca006aeaa465aa3343de7c2627b703fdb"
+    },
+    {
+      "id": "server-rest-configversion-0000001186564797",
+      "title": "ConfigVersion",
+      "group": "remoteconfig",
+      "catalog": "AppGallery-connect-References",
+      "sha256": "6a49fa58c2398c67e9a9e8513dc11dae4e23aed2850ee98c074eb6823a8cd0a7"
+    },
+    {
+      "id": "server-rest-configitem-0000001141564852",
+      "title": "ConfigItem",
+      "group": "remoteconfig",
+      "catalog": "AppGallery-connect-References",
+      "sha256": "a4179ed2b126ecd8fa4a198395dc6df4ea3793a4579d805ea06921229d4772ae"
+    },
+    {
+      "id": "server-rest-configitemvalue-0000001186884621",
+      "title": "ConfigItemValue",
+      "group": "remoteconfig",
+      "catalog": "AppGallery-connect-References",
+      "sha256": "bf328489984e2427f7ea17f3db7994e39443a5b5f06094d33758ad4691d60635"
+    },
+    {
+      "id": "server-rest-filtervalue-0000001141884646",
+      "title": "FilterValue",
+      "group": "remoteconfig",
+      "catalog": "AppGallery-connect-References",
+      "sha256": "f3ca287958586ff949dd1dcee5ec62ad7ab0bd602a7d6cf5093fc097acdc4b55"
+    },
+    {
+      "id": "server-rest-filter-0000001186564799",
+      "title": "Filter",
+      "group": "remoteconfig",
+      "catalog": "AppGallery-connect-References",
+      "sha256": "41379f74b72dcc2001f6c071be974d1539be0455b642ac8c6d56760f9223fc73"
+    },
+    {
+      "id": "server-rest-versionnamecond-0000001141564854",
+      "title": "VersionNameCond",
+      "group": "remoteconfig",
+      "catalog": "AppGallery-connect-References",
+      "sha256": "e7bbc7980aee83e7dc8b34e6baae06158598ac163ae469591ab91ba8bbeabc8c"
+    },
+    {
+      "id": "server-rest-devicechipcond-0000001169415154",
+      "title": "DeviceChipCond",
+      "group": "remoteconfig",
+      "catalog": "AppGallery-connect-References",
+      "sha256": "c1fd447011f0175bc1c8c54f05caf2bb3270b10642665c28c42ae9e0d56746c9"
+    },
+    {
+      "id": "server-rest-languagecond-0000001186884623",
+      "title": "LanguageCond",
+      "group": "remoteconfig",
+      "catalog": "AppGallery-connect-References",
+      "sha256": "c9a0f0995cadb4ba14089a98bc6f7555b3f3118901f2d0ddd2f466540d88219f"
+    },
+    {
+      "id": "server-rest-countrycond-0000001141945878",
+      "title": "CountryCond",
+      "group": "remoteconfig",
+      "catalog": "AppGallery-connect-References",
+      "sha256": "9de85f1b31e522e89d68626fa811b5dd354520143920a238cdfb8eee33151033"
+    },
+    {
+      "id": "server-rest-datetimecond-0000001188025849",
+      "title": "DateTimeCond",
+      "group": "remoteconfig",
+      "catalog": "AppGallery-connect-References",
+      "sha256": "938009dc21e4f5fb4f8e64dbe1087ebb39ea49c9d83001aa96cbc8d65baf1b0f"
+    },
+    {
+      "id": "server-rest-userratiocond-0000001187906021",
+      "title": "UserRatioCond",
+      "group": "remoteconfig",
+      "catalog": "AppGallery-connect-References",
+      "sha256": "7f9b8a2e46b4ee7a1f9c863abdfcf919292bb27f26a344867b552f02142aa6d4"
+    },
+    {
+      "id": "server-rest-systemversioncond-0000001214776129",
+      "title": "SystemVersionCond",
+      "group": "remoteconfig",
+      "catalog": "AppGallery-connect-References",
+      "sha256": "bf7c509c8f400737ae327b0c8e35ec3fca58936511dd5ff87253f5c522f1fd4d"
+    },
+    {
+      "id": "server-rest-sysversioncond-0000001214656171",
+      "title": "SysversionCond",
+      "group": "remoteconfig",
+      "catalog": "AppGallery-connect-References",
+      "sha256": "603f83ad4b01dfa8d578b5f93bd450f39cce643b305496f1dc0069a556e1e28a"
+    },
+    {
+      "id": "server-rest-browwesversioncond-0000001169254840",
+      "title": "BrowsersVersionCond",
+      "group": "remoteconfig",
+      "catalog": "AppGallery-connect-References",
+      "sha256": "28d5f9f3c353932d9422e568d0ae854c764f9912c7ecae52634e62829f6a55a4"
+    },
+    {
+      "id": "server-rest-browserscond-0000001169414782",
+      "title": "BrowsersCond",
+      "group": "remoteconfig",
+      "catalog": "AppGallery-connect-References",
+      "sha256": "7292118acd292263a209f21af1a8d820d819b37b0dbd168284b6f67b93699778"
+    },
+    {
+      "id": "server-rest-errorcde-0000001186567365",
+      "title": "Result Codes",
+      "group": "remoteconfig",
+      "catalog": "AppGallery-connect-References",
+      "sha256": "a0a89540ffb59fe13edf47211a0b044155cd20524d633b3e33584446e3af0ee0"
+    },
+    {
+      "id": "applinking-create-0000001141716380",
+      "title": "Creating a Short Link for a Cross-Platform Link",
+      "group": "applinking",
+      "catalog": "AppGallery-connect-References",
+      "sha256": "bc1a81b16510ee6305e955d63dcd516a9aabda6a7dfa2b0345a54031c56e79f5"
+    },
+    {
+      "id": "applinking-create-unifiedlinking-0000001186476535",
+      "title": "Creating a Unified Download Link",
+      "group": "applinking",
+      "catalog": "AppGallery-connect-References",
+      "sha256": "2d4e32f526b4bbadea637be25f92797add448b35d822b175f0debcac34e1a287"
+    },
+    {
+      "id": "applinking-rest-errorcode-0000001188562505",
+      "title": "Result Codes",
+      "group": "applinking",
+      "catalog": "AppGallery-connect-References",
+      "sha256": "1f7725881d70887b77fb9ad8bf5a452c4a7a67a6d60c028b1cc507aeb630f2aa"
+    },
+    {
+      "id": "api-common-statement-0000001050986127",
+      "title": "Overview",
+      "group": "iap-guide",
+      "catalog": "HMSCore-References",
+      "sha256": "32e5176bd0c686c8c212c8a392e03c6f69a8717b2874c9c8f72ddd8c9ff83e05"
+    },
+    {
+      "id": "obtain-application-level-at-0000001051066052",
+      "title": "API for Obtaining an App-Level Access Token",
+      "group": "iap-auth",
+      "catalog": "HMSCore-References",
+      "sha256": "f78bbed0b255cadf41c1011775adca62e074d5f9c06457c29c8d018e4ff20d0d"
+    },
+    {
+      "id": "api-order-verify-purchase-token-0000001050746113",
+      "title": "API for Verifying the Purchase Token for the Order Service",
+      "group": "orders",
+      "catalog": "HMSCore-References",
+      "sha256": "793b2256eff224d8b3ebad6a4b02f49aca9cff6093e99ce5582442de70898d58"
+    },
+    {
+      "id": "api-subscription-verify-purchase-token-0000001050706080",
+      "title": "API for Verifying the Purchase Token for the Subscription Service",
+      "group": "subscriptions",
+      "catalog": "HMSCore-References",
+      "sha256": "7f7dd3d191d021ad103a432d645155de842deb68595c4debb98efa08719521d9"
+    },
+    {
+      "id": "api-purchase-confirm-for-order-service-0000001051066054",
+      "title": "API for Confirming the Purchase for the Order Service",
+      "group": "orders",
+      "catalog": "HMSCore-References",
+      "sha256": "905a69d4a55de67b8b4fc68b025e694459ffd8081de4928b1ad356f34c94d0ea"
+    },
+    {
+      "id": "api-cancel-subscription-0000001050746115",
+      "title": "API for Canceling a Subscription",
+      "group": "subscriptions",
+      "catalog": "HMSCore-References",
+      "sha256": "ef7b8c10032b744e40a567e3ba774c22e7941960b5ecf223ac0a48ea189eb2f8"
+    },
+    {
+      "id": "api-delayed-settlement-0000001050706082",
+      "title": "API for Deferring Billing",
+      "group": "subscriptions",
+      "catalog": "HMSCore-References",
+      "sha256": "68a8e0a9c51253791b7a4ba7d9726f66bb94b72292cb42239d9b8b1929f6a840"
+    },
+    {
+      "id": "api-refund-subscription-fee-0000001050986131",
+      "title": "API for Refunding the Subscription Fee",
+      "group": "subscriptions",
+      "catalog": "HMSCore-References",
+      "sha256": "ada37afdad47db90e1fbb14b9c80846d517f8a4365593e99d82b57a238e2293b"
+    },
+    {
+      "id": "api-unsubscribe-0000001051066056",
+      "title": "API for Revoking a Subscription",
+      "group": "subscriptions",
+      "catalog": "HMSCore-References",
+      "sha256": "7dee8e3efe9696ac1549b87fe81b5a386a883303df28b12cd51f9a860eb0561e"
+    },
+    {
+      "id": "api-cancel-or-refund-record-0000001050746117",
+      "title": "API for Querying Canceled or Refunded Orders",
+      "group": "orders",
+      "catalog": "HMSCore-References",
+      "sha256": "6e67d4a0bed7574c35b8d710d0ce67eb6fa97aeba717b8546c54bc4c2dc7d4e4"
+    },
+    {
+      "id": "api-application-query-orderinfo-0000001431190629",
+      "title": "API for Querying Orders Related to Specific Purchase Records",
+      "group": "orders",
+      "catalog": "HMSCore-References",
+      "sha256": "099e7e7eddfc3b4379d037025e22891efa5b7e2aa93b77297f5ba3fbb177fde7"
+    },
+    {
+      "id": "api-notifications-about-subscription-events-0000001050706084",
+      "title": "API for Sending Key Subscription Event Notifications via Notification Service v1",
+      "group": "iap-notifications",
+      "catalog": "HMSCore-References",
+      "sha256": "4bb889918bbd93edbdbcc5f3cfdaf0b3488dfe184e5c2d89b5870157d770259e"
+    },
+    {
+      "id": "api-notifications-about-subscription-events-v2-0000001385268541",
+      "title": "API for Sending Key Order or Subscription Event Notifications via Notification Service v2",
+      "group": "iap-notifications",
+      "catalog": "HMSCore-References",
+      "sha256": "2de64932ce3f1cf733d7420708eeb021604c5f9466a6e6a000be72b488c2a471"
+    },
+    {
+      "id": "api-notifications-about-pending-payment-events-0000001230063777",
+      "title": "Notification About a Key Event of Pending Purchase",
+      "group": "iap-notifications",
+      "catalog": "HMSCore-References",
+      "sha256": "e530ae3fcc7b961f8e29400f25641d467f3e40c9da5c89f7286b4afcda617081"
+    },
+    {
+      "id": "server-data-model-0000001050986133",
+      "title": "Data Models",
+      "group": "iap-appendix",
+      "catalog": "HMSCore-References",
+      "sha256": "982d112339a08ebe6849651a43046c139b16198a5ba24e601a153d312ff65eda"
+    },
+    {
+      "id": "server-error-code-0000001050166248",
+      "title": "Result Codes",
+      "group": "iap-appendix",
+      "catalog": "HMSCore-References",
+      "sha256": "9ef4ab2907a70a0cdb9eafbbf250227ee719ff8c2fadbc87f69abd3be1b13cd0"
+    },
+    {
+      "id": "iap-rest-common-statement",
+      "title": "Overview",
+      "group": "iapkit",
+      "catalog": "harmonyos-references",
+      "sha256": "8469a074e0d1271f06327cd3fbb71a3186166fe086d4892d2ba42d024d150e5e"
+    },
+    {
+      "id": "iap-jwt-description",
+      "title": "Generating a Token for a Server-Side API Call",
+      "group": "iapkit",
+      "catalog": "harmonyos-references",
+      "sha256": "cfb64c5b43d6b33acb894f03b9b89b12782da6e0e9081417e6913e6de0f8e663"
+    },
+    {
+      "id": "iap-verifying-signature",
+      "title": "Verifying the Signature in the Returned Result",
+      "group": "iapkit",
+      "catalog": "harmonyos-references",
+      "sha256": "05d8ebf81dc824b8c0c497d75ac3bcdf6c2a0ea99b8e2f4d64566c360f5d53fc"
+    },
+    {
+      "id": "iap-query-order-status",
+      "title": "Querying the Order Status for a Consumable, Non-consumable, or Non-renewable Subscription",
+      "group": "iapkit",
+      "catalog": "harmonyos-references",
+      "sha256": "e4fb01a23747a7aa9825b3de698b4ff4229bdf2f16cd6baf96e3527d387d85cd"
+    },
+    {
+      "id": "iap-confirm-purchase-for-order",
+      "title": "Acknowledging the Delivery for a Consumable, Non-consumable, or Non-renewable Subscription",
+      "group": "iapkit",
+      "catalog": "harmonyos-references",
+      "sha256": "491ec4c13c799b095eb429b288ac8714158ab7d6732f0125333efbed513bf0cb"
+    },
+    {
+      "id": "iap-order-query",
+      "title": "Querying Orders Related to Specific Purchase Records",
+      "group": "iapkit",
+      "catalog": "harmonyos-references",
+      "sha256": "33573a6b7dfcbd4ae2d6f492c1a418bd874923ea54cb23281d84760e06e7b42a"
+    },
+    {
+      "id": "iap-query-subscription-status",
+      "title": "Querying the Subscription Status",
+      "group": "iapkit",
+      "catalog": "harmonyos-references",
+      "sha256": "bcc10df2a9d981b4c2be10c632c633929ddda84d1dcdfeaab725ef269e13f02e"
+    },
+    {
+      "id": "iap-confirm-purchase-for-sub",
+      "title": "Acknowledging the Delivery for a Subscription",
+      "group": "iapkit",
+      "catalog": "harmonyos-references",
+      "sha256": "8f13b67f1636ea2f3cec20a0b165b6d6c7ad38430326058d15f8ac74fc1c1628"
+    },
+    {
+      "id": "iap-date-delay-for-sub",
+      "title": "Postponing a Subscription Renewal Date",
+      "group": "iapkit",
+      "catalog": "harmonyos-references",
+      "sha256": "ca35f6cc949ce2ea81c356b6449c154bb868807ed77a032bfd2f28af8ec164e0"
+    },
+    {
+      "id": "iap-order-info-query-by-transaction-number",
+      "title": "Querying the Order Status by Order Number",
+      "group": "iapkit",
+      "catalog": "harmonyos-references",
+      "sha256": "df21bedbf4ae1bed220aa6eff9b5a75748cbc34dc9402c5635593c9a4175ff79"
+    },
+    {
+      "id": "iap-order-info-query-by-order-history",
+      "title": "Querying the Purchase History of a User",
+      "group": "iapkit",
+      "catalog": "harmonyos-references",
+      "sha256": "ed36ccdb27a1135d1fefa8b3ad4820d34391f742bf1593d4fea2b14e4970b93d"
+    },
+    {
+      "id": "iap-server-notifications-record-query",
+      "title": "Querying Server-Side Notification Records",
+      "group": "iapkit",
+      "catalog": "harmonyos-references",
+      "sha256": "d22d9a4559a02704c4f6b7e514bbf1d856650a909c2c47c57cd54189185b2d0e"
+    },
+    {
+      "id": "iap-server-notifications-test",
+      "title": "Testing Server-Side Notifications",
+      "group": "iapkit",
+      "catalog": "harmonyos-references",
+      "sha256": "3b04098d3cdb2a3d7f3c7099a7df4057945384d0105423059f25869ed6f3ed94"
+    },
+    {
+      "id": "iap-server-subscribe-offer-sign",
+      "title": "Generating a Signed Purchase Parameter for a Promotion",
+      "group": "iapkit",
+      "catalog": "harmonyos-references",
+      "sha256": "ab3f69e774af3edcdb6b62198ca1ad055dbbf6cc8e1ba835b20e378389a656c8"
+    },
+    {
+      "id": "iap-key-event-notifications",
+      "title": "Key Event Notifications",
+      "group": "iapkit",
+      "catalog": "harmonyos-references",
+      "sha256": "3471fddd9c3b3ce3a3445fbbd38cdeec733c191fdcdf20709631d0a090a93fc0"
+    },
+    {
+      "id": "iap-server-refund-notify-and-handle",
+      "title": "Refund Request Notifications and Handling",
+      "group": "iapkit",
+      "catalog": "harmonyos-references",
+      "sha256": "1695f38f250f8f68712cfbf9a254e7ddf510aa35d6513448265da44cd9394267"
+    },
+    {
+      "id": "iap-server-refund-receive-notify",
+      "title": "Receiving a Refund Request Notification",
+      "group": "iapkit",
+      "catalog": "harmonyos-references",
+      "sha256": "e28a5579ac364127b6551f0c8a1451ffe0c706284206a214a18a3aaa740d4b0a"
+    },
+    {
+      "id": "iap-server-refund-return-result",
+      "title": "Returning the Refund Review Result",
+      "group": "iapkit",
+      "catalog": "harmonyos-references",
+      "sha256": "079d0e7ea5027a27e524d9152a81a3a00f535efc8dfbccca1f63489fa0b6aa98"
+    },
+    {
+      "id": "iap-server-data-model",
+      "title": "Data Types",
+      "group": "iapkit",
+      "catalog": "harmonyos-references",
+      "sha256": "93e3b90b8f8d8f765a59266814ef1748ed32e58bd60d3e35ccdc0d5bef751fd0"
+    },
+    {
+      "id": "iap-server-error-code",
+      "title": "REST API Error Codes",
+      "group": "iapkit",
+      "catalog": "harmonyos-references",
+      "sha256": "8b0345c18059c58c9bbc1dfb2730b6a51ceffab3a7f6dc33f97cd935e8c46d8f"
     }
   ]
 }

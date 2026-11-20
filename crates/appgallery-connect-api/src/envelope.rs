@@ -40,6 +40,14 @@ pub const RESULT_ERROR_CODE: ResultDef = ResultDef {
     message_field: "errorMsg",
 };
 
+/// Конверт HMS IAP: `responseCode` и `responseMessage` в корне тела, код строкой (`"0"` —
+/// успех). В [`KNOWN_RESULTS`] не входит: у запросов AppGallery Connect API его нет.
+pub const RESULT_RESPONSE_CODE: ResultDef = ResultDef {
+    field: "",
+    code_field: "responseCode",
+    message_field: "responseMessage",
+};
+
 /// Известные конверты в порядке проверки.
 pub const KNOWN_RESULTS: &[ResultDef] = &[RESULT_RET_CODE, RESULT_RET_RTN_CODE, RESULT_ERROR_CODE];
 
@@ -67,7 +75,13 @@ impl ResultStatus {
 /// оно не объект или в нём нет кода).
 pub fn read_result(body: &Value, def: &ResultDef) -> Option<ResultStatus> {
     let parsed;
-    let object = match body.get(def.field)? {
+    // Пустое поле — код в корне тела.
+    let holder = if def.field.is_empty() {
+        body
+    } else {
+        body.get(def.field)?
+    };
+    let object = match holder {
         Value::Object(object) => object,
         // `ret` строкой с JSON внутри: `"{\"code\": 0, \"msg\": \"success\"}"`.
         Value::String(text) if text.trim_start().starts_with('{') => {
@@ -223,5 +237,20 @@ mod tests {
             "3"
         );
         assert_eq!(read_result(&body, &RESULT_ERROR_CODE), None);
+    }
+
+    #[test]
+    fn root_envelope_of_iap() {
+        let ok = json!({"responseCode": "0", "responseMessage": "success", "x": 1});
+        let status = read_result(&ok, &RESULT_RESPONSE_CODE).unwrap();
+        assert!(status.is_success());
+        let failed = json!({"responseCode": "6", "responseMessage": "invalid token"});
+        let status = result_of(&failed, Some(&RESULT_RESPONSE_CODE)).unwrap();
+        assert_eq!(status.code, "6");
+        assert_eq!(status.message.as_deref(), Some("invalid token"));
+        assert!(!status.is_success());
+        // Корневой конверт не определяется по телу запросов AppGallery Connect API.
+        assert_eq!(detect_result(&failed), None);
+        assert_eq!(read_result(&json!({"x": 1}), &RESULT_RESPONSE_CODE), None);
     }
 }

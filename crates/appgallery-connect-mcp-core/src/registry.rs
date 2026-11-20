@@ -114,6 +114,12 @@ pub struct ToolRegistry {
     custom: Vec<(RegisteredTool, &'static str)>,
     /// Пользовательские инструменты выше уровня доступа сервера и почему они недоступны.
     disabled_custom: HashMap<String, String>,
+    /// Локальные файлы доступны ([`ServerOptions::local_files`]); без них составные
+    /// инструменты с обязательным файловым аргументом не регистрируются.
+    local_files: bool,
+    /// HTTP-режим ([`ServerOptions::http`]): уровень доступа задаёт токен клиента, и
+    /// подсказки говорят об операторе сервера, а не о флагах запуска.
+    http: bool,
 }
 
 impl ToolRegistry {
@@ -151,12 +157,11 @@ impl ToolRegistry {
                     tool.name.clone(),
                     format!(
                         "custom tool `{}` is disabled: it {} data in AppGallery Connect and the \
-                         server runs with {} access. Ask the user to restart the server with {} \
-                         if this is intended",
+                         server runs with {} access. {}",
                         tool.name,
                         access_verb(access),
                         access_name(options.max_access),
-                        access_flag(access),
+                        access_hint(access, options.http),
                     ),
                 );
             }
@@ -170,6 +175,8 @@ impl ToolRegistry {
             dynamic: options.dynamic_toolsets,
             custom,
             disabled_custom,
+            local_files: options.local_files(),
+            http: options.http,
         }
         .populate()
     }
@@ -191,6 +198,8 @@ impl ToolRegistry {
             dynamic: self.dynamic,
             custom: self.custom.clone(),
             disabled_custom: self.disabled_custom.clone(),
+            local_files: self.local_files,
+            http: self.http,
         }
         .populate()
     }
@@ -200,12 +209,12 @@ impl ToolRegistry {
     /// составные, пользовательские инструменты.
     fn populate(mut self) -> Result<Self, String> {
         self.push(RegisteredTool {
-            tool: api_search_tool(),
+            tool: api_search_tool(self.http),
             kind: ToolKind::ApiSearch,
             access: AccessLevel::Read,
         });
         self.push(RegisteredTool {
-            tool: api_request_tool(self.max_access),
+            tool: api_request_tool(self.max_access, self.http),
             kind: ToolKind::ApiRequest,
             access: self.max_access,
         });
@@ -235,7 +244,10 @@ impl ToolRegistry {
             }
         }
         for (index, composite) in self.composite.clone().iter().enumerate() {
-            if self.max_access.allows(composite.access) && self.toolset_enabled(composite.toolset) {
+            if self.max_access.allows(composite.access)
+                && self.toolset_enabled(composite.toolset)
+                && (self.local_files || !requires_local_files(composite))
+            {
                 self.push(RegisteredTool {
                     tool: composite_tool(composite)?,
                     kind: ToolKind::Composite(index),
@@ -275,6 +287,11 @@ impl ToolRegistry {
     /// Максимальный уровень доступа сервера.
     pub fn max_access(&self) -> AccessLevel {
         self.max_access
+    }
+
+    /// HTTP-режим: уровень доступа задаёт токен клиента, а не флаги перезапуска.
+    pub fn http(&self) -> bool {
+        self.http
     }
 
     /// Режим динамических наборов: наборы включаются инструментом `enable_toolset`.
@@ -338,11 +355,22 @@ impl ToolRegistry {
         if !self.max_access.allows(access) {
             return Some(format!(
                 "tool `{name}` is disabled: it {} data in AppGallery Connect and the server runs \
-                 with {} access. Ask the user to restart the server with {} if this change is \
-                 intended",
+                 with {} access. {}",
                 access_verb(access),
                 access_name(self.max_access),
-                access_flag(access),
+                access_hint(access, self.http),
+            ));
+        }
+        if !self.local_files
+            && self
+                .composite
+                .iter()
+                .any(|tool| tool.name == name && requires_local_files(tool))
+        {
+            return Some(format!(
+                "tool `{name}` is disabled: it reads or writes files, and this server runs \
+                 remotely over HTTP without a file directory. Ask the server operator to start \
+                 it with --allow-path <dir> if files are needed"
             ));
         }
         if !self.toolset_enabled(toolset) {
@@ -532,6 +560,65 @@ pub fn access_flag(access: AccessLevel) -> &'static str {
         AccessLevel::Write => "--allow-write",
         AccessLevel::Destructive => "--allow-destructive",
     }
+}
+
+/// Что даёт уровень доступа `access`, для вставки в сообщение («needs …»): в stdio — сервер,
+/// запущенный с флагом, в HTTP-режиме — токен доступа с этим уровнем.
+pub fn access_requirement(access: AccessLevel, http: bool) -> String {
+    if http {
+        format!("an access token with the {} level", access_name(access))
+    } else {
+        format!("a server started with {}", access_flag(access))
+    }
+}
+
+/// Как получить уровень доступа `access`: в stdio — перезапуск сервера с флагом, в
+/// HTTP-режиме — токен доступа с этим уровнем от оператора сервера.
+pub fn access_hint(access: AccessLevel, http: bool) -> String {
+    if http {
+        format!(
+            "This server runs remotely over HTTP: {} if this change is intended",
+            access_action(access, http)
+        )
+    } else {
+        format!(
+            "Ask the user to restart the server with {} if this change is intended",
+            access_flag(access)
+        )
+    }
+}
+
+/// Что попросить у пользователя ради уровня `access`, со строчной буквы: «ask the user …».
+pub fn access_action(access: AccessLevel, http: bool) -> String {
+    if http {
+        format!(
+            "ask the user for an access token with the {} level from the server operator",
+            access_name(access)
+        )
+    } else {
+        format!(
+            "ask the user to restart the server with {}",
+            access_flag(access)
+        )
+    }
+}
+
+/// Имена файловых аргументов составных инструментов: путь к файлу или каталогу.
+pub const FILE_ARGUMENTS: &[&str] = &["file", "dir", "save_to"];
+
+/// Нужны ли составному инструменту локальные файлы: среди обязательных аргументов схемы
+/// есть файловый ([`FILE_ARGUMENTS`]). Без локальных файлов (HTTP-режим без `--allow-path`)
+/// такой инструмент не регистрируется: вызвать его всё равно нельзя.
+pub fn requires_local_files(tool: &CompositeTool) -> bool {
+    (tool.input_schema)()
+        .get("required")
+        .and_then(Value::as_array)
+        .is_some_and(|required| {
+            required
+                .iter()
+                .filter_map(Value::as_str)
+                .any(|name| FILE_ARGUMENTS.contains(&name))
+        })
 }
 
 #[cfg(test)]
@@ -743,6 +830,60 @@ mod tests {
             reason.contains("--toolsets (enabled: products)"),
             "{reason}"
         );
+    }
+
+    #[test]
+    fn http_mode_hides_file_tools_without_allowed_paths() {
+        let names = |options: &ServerOptions| -> Vec<String> {
+            ToolRegistry::new(options)
+                .unwrap()
+                .iter()
+                .map(|tool| tool.tool.name.to_string())
+                .collect()
+        };
+        let base = ServerOptions {
+            max_access: AccessLevel::Destructive,
+            toolsets: Some(vec!["all".into()]),
+            ..ServerOptions::default()
+        };
+        let stdio = names(&base);
+        let http = ServerOptions {
+            http: true,
+            ..base.clone()
+        };
+        assert!(!http.local_files());
+        let remote = names(&http);
+        for tool in [
+            "package_upload",
+            "listing_export",
+            "listing_apply",
+            "image_sync",
+        ] {
+            assert!(stdio.iter().any(|n| n == tool), "{tool}");
+            assert!(!remote.iter().any(|n| n == tool), "{tool}");
+        }
+        // Без обязательного файла инструмент полезен и без каталога: остаётся.
+        assert!(remote.iter().any(|n| n == "release_status"));
+        let registry = ToolRegistry::new(&http).unwrap();
+        let reason = registry.unavailable_reason("package_upload").unwrap();
+        assert!(reason.contains("--allow-path"), "{reason}");
+
+        let with_dir = ServerOptions {
+            allowed_paths: vec![std::env::temp_dir()],
+            ..http.clone()
+        };
+        assert!(with_dir.local_files());
+        assert!(names(&with_dir).iter().any(|n| n == "package_upload"));
+
+        // Уровень доступа в HTTP-режиме даёт токен оператора, а не флаг запуска.
+        let read = ToolRegistry::new(&ServerOptions {
+            max_access: AccessLevel::Read,
+            ..http
+        })
+        .unwrap();
+        let reason = read.unavailable_reason("update_app_info").unwrap();
+        assert!(reason.contains("server operator"), "{reason}");
+        assert!(!reason.contains("--allow-write"), "{reason}");
     }
 
     #[test]

@@ -5,8 +5,11 @@
 | Команда | Что делает |
 | --- | --- |
 | [`auth login`](#auth-login), [`auth status`](#auth-status), [`auth logout`](#auth-logout) | Учётные данные API-клиента профиля в системном хранилище. |
+| [`auth project add`, `auth project remove`](#auth-project-add) | API-клиенты проектов профиля ([API-клиент проекта](api-client.md#api-клиент-проекта)). |
+| [`auth app-secret set`, `auth app-secret remove`](#auth-app-secret-set) | Секреты приложений профиля для серверных API покупок в приложении ([Секрет приложения](api-client.md#секрет-приложения)). |
+| [`key exec`](#key-exec) | Запуск команды с учётными данными профиля во временном файле (Gradle-плагин, fastlane, свои скрипты). |
 | [`connect`](#connect) | Регистрация сервера в Claude Code или Codex (и сохранение учётных данных, если их нет). |
-| [`serve`](#serve) | MCP-сервер через stdio. |
+| [`serve`](#serve) | MCP-сервер через stdio или HTTP ([HTTP-режим](http.md)). |
 | [`toolsets`](#toolsets) | Наборы инструментов и число инструментов по уровням доступа. |
 | [`tools list`, `tools check`](#tools) | Инструменты, которые зарегистрирует сервер, и проверка файлов `tools.toml`. |
 
@@ -16,13 +19,13 @@
 
 ## Профили
 
-Профиль — один API-клиент одного кабинета AppGallery Connect и настройки сервера для него.
+Профиль — один API-клиент одного кабинета AppGallery Connect (или вход пользователя HUAWEI ID в одной команде, `auth login --oauth`) и настройки сервера для него.
 
-- Учётные данные (Client ID и секрет) хранятся только в системном хранилище: Keychain в macOS, Secret Service в Linux (GNOME Keyring, KDE Wallet, KeePassXC), Credential Manager в Windows. Запись — сервис `dev.filipov.appgallery-connect-mcp`, учётная запись — имя профиля. Файлового хранилища нет: в Linux без Secret Service команды завершаются ошибкой с подсказкой.
+- Учётные данные (Client ID и секрет) хранятся только в системном хранилище: Keychain в macOS, Secret Service в Linux (GNOME Keyring, KDE Wallet, KeePassXC), Credential Manager в Windows. Запись — сервис `dev.filipov.appgallery-connect-mcp`, учётная запись — имя профиля, у API-клиента проекта — `<профиль>/project/<Project ID>`, у входа пользователя (OAuth-клиент и refresh token) — `<профиль>/oauth`, у секрета приложения — `<профиль>/app/<App ID>`. Файлового хранилища нет: в Linux без Secret Service команды завершаются ошибкой с подсказкой.
 - Несекретные настройки — в `profiles.toml` в каталоге настроек: `~/.config/appgallery-connect-mcp/` (в Linux — `$XDG_CONFIG_HOME/appgallery-connect-mcp/`, если переменная задана; в macOS тоже `~/.config`; в Windows — `%APPDATA%\appgallery-connect-mcp\`). Там же лежит файл пользовательских инструментов `tools.toml`.
 - Имя профиля — флаг `--profile`, иначе переменная окружения `APPGALLERY_CONNECT_MCP_PROFILE`, иначе `default`. Допустимы `A-Z`, `a-z`, `0-9`, `.`, `_`, `-`, до 64 символов, без `-` в начале.
 - Секрет не читается из переменных окружения и `.env` и не принимается аргументом командной строки.
-- Ни одна команда не выводит секрет и access token.
+- Ни одна команда не выводит секрет, access token и refresh token.
 
 Пример `profiles.toml`:
 
@@ -36,17 +39,23 @@ allow_write = true
 allow_destructive = false
 toolsets = []
 dynamic_toolsets = true
+projects = ["100000002"]
+app_secrets = ["100000001"]
 ```
 
 | Поле | Что значит | Кто пишет |
 | --- | --- | --- |
-| `region` | Регион кабинета: `cn`, `de`, `sg` или `ru` ([Регион и хост](api-client.md#регион-и-хост)). | `auth login`, `connect` (`--region`) |
+| `region` | Регион кабинета: `cn`, `de`, `sg` или `ru` ([Регион и хост](api-client.md#регион-и-хост)). У входа пользователя — по сайту команды. | `auth login`, `connect` (`--region`) |
+| `type` | Способ входа: нет поля — API-клиент, `oauth` — вход пользователя. | `auth login` (`--oauth`) |
+| `team_id` | Команда входа пользователя (заголовок `teamId`). | `auth login --oauth` |
 | `apps` | App ID приложений по умолчанию (числа строкой). | `--default-app` |
 | `packages` | Имена пакетов по умолчанию. | `--default-package` |
 | `client` | MCP-клиент, в котором профиль подключён (`claude-code`, `codex`). | `connect` |
 | `allow_write`, `allow_destructive` | Уровень доступа сервера, если в `serve` нет флагов. | `connect` |
 | `toolsets` | Наборы при запуске; пустой список — наборы по умолчанию. | `connect` (`--toolsets`) |
 | `dynamic_toolsets` | Наборы включает агент по запросу. | `connect` |
+| `projects` | Project ID проектов, для которых в хранилище есть API-клиент проекта (без Client ID и секрета). | `auth project add`, `auth project remove` |
+| `app_secrets` | App ID приложений, для которых в хранилище есть секрет приложения (без client ID и секрета). | `auth app-secret set`, `auth app-secret remove` |
 
 Неизвестное поле в файле — ошибка. Файл можно править вручную.
 
@@ -60,7 +69,7 @@ dynamic_toolsets = true
 | `RUST_LOG` | Уровень логов `serve`, если нет `--log-level`. |
 | `CODEX_HOME` | Каталог Codex для `connect codex` (по умолчанию `~/.codex`). |
 
-Учётные данные из переменных окружения не читаются.
+Учётные данные из переменных окружения не читаются. Переменные, которые `key exec` задаёт дочерней команде, описаны в разделе [key exec](#key-exec).
 
 ## auth login
 
@@ -89,23 +98,180 @@ appgallery-connect-mcp auth login --region ru --client-id <Client ID> --secret-f
 pass show agc/secret | appgallery-connect-mcp auth login --profile client --client-id <Client ID> --secret-stdin
 ```
 
+### Вход пользователя (`--oauth`)
+
+```
+appgallery-connect-mcp auth login --oauth [--profile <имя>] [--oauth-client-id <ID>]
+    [--secret-file <путь> | --secret-stdin] [--team-id <ID>] [--oauth-scope <область>]...
+    [--redirect-uri http://127.0.0.1:<порт>/] [--no-browser] [--region cn|de|sg|ru]
+    [--default-app <App ID>]... [--default-package <имя пакета>]...
+```
+
+Профиль работает от имени пользователя HUAWEI ID через OAuth-клиент, а не API-клиент ([Вход пользователя](api-client.md#вход-пользователя-oauth-клиент)).
+
+- `--oauth-client-id` — client ID OAuth-клиента (App ID приложения с HUAWEI ID). Без флага его спрашивают в терминале, и перед вопросом печатается, где взять клиент.
+- Секрет OAuth-клиента — как у API-клиента: `--secret-file`, `--secret-stdin` (нужен `--oauth-client-id`) или скрытый ввод; пустой ввод — клиент без секрета. `--client-id` и `--no-verify` с `--oauth` не сочетаются.
+- `--team-id` — команда, в которой работать. Без флага: единственная команда пользователя выбирается сама, из нескольких выбирают в терминале, без терминала это ошибка. Если список команд не получен, без `--team-id` ничего не сохраняется, а с ним вход сохраняется без проверки команды.
+- `--oauth-scope` — области Connect API: `publish`, `develop`, `report/read`, `project`, `product`, `product/read` или полный адрес области (повторяемый флаг или через запятую). По умолчанию — `publish` и `project`, `openid` запрашивается всегда. Если HUAWEI ID выдал не все области, команда об этом предупреждает.
+- `--redirect-uri` — постоянный адрес возврата OAuth-клиента: только `http://127.0.0.1:<порт>/…` или `http://localhost:<порт>/…` с явным портом. Без флага используется случайный порт на 127.0.0.1.
+- `--no-browser` — не открывать браузер: команда печатает ссылку, а вы вставляете адрес, на который вернулся браузер. То же происходит, если браузер открыть нельзя.
+- `--region` — регион для списка команд. Регион профиля после входа берётся по сайту выбранной команды; если `--region` с ним не совпадает, это ошибка.
+
+Команда проверяет, что по полученному refresh token выдаётся access token, и только после этого сохраняет вход в хранилище, а `type = "oauth"` и `team_id` — в профиль. Если что-то не так, ничего не сохраняется. API-клиент команды этого профиля после входа удаляется из хранилища. Обычный `auth login` возвращает профиль к API-клиенту и удаляет вход пользователя.
+
+```bash
+appgallery-connect-mcp auth login --oauth --profile guest --oauth-client-id <client ID> \
+    --secret-file ~/oauth-secret.txt --redirect-uri http://127.0.0.1:8765/
+```
+
 ## auth status
 
 ```
 appgallery-connect-mcp auth status [--profile <имя>] [--check]
 ```
 
-Показывает, доступно ли системное хранилище, и для профиля: регион и хост API, Client ID в маске, сохранены ли учётные данные, приложения и пакеты по умолчанию, сохранённые настройки доступа и наборы. Без `--profile` (и без `APPGALLERY_CONNECT_MCP_PROFILE`) — все профили `profiles.toml`; если профилей нет, это ошибка. `--check` ещё и получает access token по сохранённым учётным данным.
+Показывает, доступно ли системное хранилище, и для профиля: регион и хост API, Client ID в маске, сохранены ли учётные данные, приложения и пакеты по умолчанию, сохранённые настройки доступа и наборы. Без `--profile` (и без `APPGALLERY_CONNECT_MCP_PROFILE`) — все профили `profiles.toml`; если профилей нет, это ошибка. Для каждого проекта из `projects` — Client ID клиента проекта в маске и сохранён ли он. Для каждого приложения из `app_secrets` — сохранён ли его секрет (строка `App secrets:`; client ID не выводится). `--check` ещё и получает access token по сохранённым учётным данным, в том числе по каждому клиенту проекта и токен уровня приложения по каждому секрету приложения.
 
-Код возврата ненулевой, если профиль не готов: нет учётных данных, хранилище недоступно или проверка не прошла.
+Для профиля со входом пользователя — команда, client ID OAuth-клиента в маске, есть ли у него секрет, выданные области и запись хранилища `<профиль>/oauth`. `--check` обновляет access token по refresh token и проверяет, что команда профиля есть в списке команд пользователя. Новый refresh token, если HUAWEI ID его выдаст, сохраняется.
+
+Код возврата ненулевой, если профиль не готов: нет учётных данных (в том числе клиента проекта из `projects` или секрета приложения из `app_secrets`), хранилище недоступно или проверка не прошла.
 
 ## auth logout
 
 ```
-appgallery-connect-mcp auth logout [--profile <имя>]
+appgallery-connect-mcp auth logout [--profile <имя>] [--forget]
 ```
 
-Удаляет учётные данные профиля из системного хранилища и профиль из `profiles.toml`. Выход из несуществующего профиля — не ошибка. Если хранилище недоступно, профиль не трогается. В AppGallery Connect API-клиент остаётся, пока вы его не удалите ([Отзыв доступа](api-client.md#отзыв-доступа)).
+Удаляет учётные данные профиля (API-клиент или вход пользователя), API-клиенты его проектов и секреты приложений из системного хранилища и профиль из `profiles.toml`. `--forget` сначала отзывает вход пользователя в HUAWEI ID; если отозвать не удалось, ничего не удаляется. Без `--forget` refresh token остаётся действительным до истечения срока, и команда об этом предупреждает. Выход из несуществующего профиля — не ошибка. Если хранилище недоступно, профиль не трогается. В AppGallery Connect API-клиент остаётся, пока вы его не удалите ([Отзыв доступа](api-client.md#отзыв-доступа)).
+
+## auth project add
+
+Сохраняет API-клиент проекта в профиль ([API-клиент проекта](api-client.md#api-клиент-проекта)). Он нужен операциям серверных API сервисов проекта — сейчас это наборы `remote-config` (Remote Configuration) и `app-linking` (App Linking); остальные операции идут от API-клиента команды профиля.
+
+```
+appgallery-connect-mcp auth project add [--profile <имя>] --credential-file <agc-apiclient-….json> [--project-id <ID>] [--no-verify]
+appgallery-connect-mcp auth project add [--profile <имя>] --project-id <ID> [--client-id <ID>]
+    [--secret-file <путь> | --secret-stdin] [--no-verify]
+```
+
+- Профиль уже должен быть в `profiles.toml` (`auth login`): регион клиента проекта — регион профиля.
+- `--credential-file` — файл `agc-apiclient-*.json` (проект → Project settings → Server SDK → API client → Download credential). Из него берутся `project_id`, `client_id` и `client_secret`. Файл API-клиента команды (`"type": "team_client_id"`) не принимается: для него — `auth login`. Если в файле есть `region`, он должен совпадать с регионом профиля. Если задан и `--project-id`, он должен совпадать с `project_id` файла. Неизвестные поля файла пропускаются; в сообщениях об ошибке разбора нет значений из файла. Путь не запоминается, после команды файл можно удалить.
+- Без файла: `--project-id` (Project settings → General information), `--client-id` (без флага спрашивается в терминале) и секрет — `--secret-file`, `--secret-stdin` или скрытый ввод, как у `auth login`.
+- Project ID — от 1 до 64 символов `A-Z`, `a-z`, `0-9`, `_`, `-`.
+- Без `--no-verify` команда получает access token клиентом проекта на хосте региона профиля; если не получилось, ничего не сохраняется.
+- Клиент записывается в хранилище под учётной записью `<профиль>/project/<Project ID>`, Project ID — в `projects` профиля. Повторная команда заменяет клиент проекта.
+- Запущенный сервер клиента не увидит: перезапустите MCP-клиент.
+
+## auth project remove
+
+```
+appgallery-connect-mcp auth project remove [--profile <имя>] --project-id <ID>
+```
+
+Удаляет API-клиент проекта из хранилища и Project ID из `projects` профиля. В AppGallery Connect клиент остаётся.
+
+## auth app-secret set
+
+Сохраняет секрет приложения в профиль ([Секрет приложения](api-client.md#секрет-приложения)). Он нужен инструментам набора `purchases` (серверные API покупок в приложении HMS IAP): они не принимают API-клиент.
+
+```
+appgallery-connect-mcp auth app-secret set [--profile <имя>] --app <App ID> [--client-id <ID>]
+    [--secret-file <путь> | --secret-stdin] [--no-verify]
+```
+
+- Профиль уже должен быть в `profiles.toml` (`auth login`).
+- `--app` — App ID (My apps → приложение → App information), только цифры, до 20 знаков.
+- `--client-id` — OAuth client ID приложения, если он не совпадает с App ID; по справочнику IAP client ID — это App ID, поэтому обычно флаг не нужен.
+- Секрет — client secret приложения (App information или All services → In-App Purchases): `--secret-file`, `--secret-stdin` или скрытый ввод, как у `auth login`. Аргументом командной строки он не принимается.
+- Без `--no-verify` команда получает токен уровня приложения у Huawei OAuth (`oauth-login.cloud.huawei.com`); если не получилось, ничего не сохраняется.
+- Секрет записывается в хранилище под учётной записью `<профиль>/app/<App ID>`, App ID — в `app_secrets` профиля. Повторная команда заменяет секрет.
+- Запущенный сервер секрета не увидит: перезапустите MCP-клиент.
+
+```bash
+appgallery-connect-mcp auth app-secret set --profile work --app 100000001 --secret-file ~/app-secret.txt
+```
+
+## auth app-secret remove
+
+```
+appgallery-connect-mcp auth app-secret remove [--profile <имя>] --app <App ID>
+```
+
+Удаляет секрет приложения из хранилища и App ID из `app_secrets` профиля. Сам секрет в AppGallery Connect остаётся; если он мог утечь, сбросьте его там.
+
+## key exec
+
+Запускает команду с учётными данными API-клиента профиля во временном файле — для программ, которым нужны Client ID и секрет: Gradle-плагин публикации в AppGallery, fastlane, свои скрипты.
+
+```
+appgallery-connect-mcp key exec [--profile <имя>] [--project-id <ID>] [--format json|dotenv] [--env <ИМЯ>]...
+    -- <команда> [аргументы...]
+```
+
+- `--project-id` — отдать вместо API-клиента команды API-клиент этого проекта ([auth project add](#auth-project-add)) в том же формате файла. Если его нет, команда завершается ошибкой с подсказкой `auth project add`.
+- Учётные данные берутся из системного хранилища по профилю. Если их нет, команда завершается ошибкой с подсказкой `auth login --profile <имя>`, файл не создаётся и команда не запускается.
+- Профиль со входом пользователя (`auth login --oauth`) API-клиента команды не имеет: `key exec` для него завершается ошибкой, refresh token другим программам не отдаётся. `--project-id` с таким профилем работает.
+- Учётные данные записываются в новый файл с правами 0600 в новом временном каталоге с правами 0700. В Windows вместо режимов — ACL: доступ к каталогу и файлу только у текущего пользователя.
+- Команда запускается без оболочки, stdin наследуется. Переменные окружения команды:
+
+| Переменная | Что в ней |
+| --- | --- |
+| `APPGALLERY_CONNECT_CREDENTIALS_FILE` | Путь к файлу учётных данных. |
+| `APPGALLERY_CONNECT_REGION` | Регион профиля: `cn`, `de`, `sg` или `ru` ([Регион и хост](api-client.md#регион-и-хост)). Не секрет. |
+
+- `--env NAME` (повторяемый) кладёт путь в `NAME` вместо `APPGALLERY_CONNECT_CREDENTIALS_FILE`; тогда `APPGALLERY_CONNECT_CREDENTIALS_FILE` убирается из окружения команды, чтобы она не указала на другой файл.
+- Сами Client ID и секрет в переменные окружения и аргументы не попадают. Унаследованные `HUAWEI_CLIENT_ID` и `HUAWEI_CLIENT_SECRET` убираются, чтобы команда не взяла чужой API-клиент; использовать их в `--env` нельзя.
+- Аргументы команды не раскрываются: чтобы подставить переменную, запустите оболочку сами, в одинарных кавычках.
+
+### Формат файла
+
+| `--format` | Файл | Содержимое | Для чего |
+| --- | --- | --- | --- |
+| `json` (по умолчанию) | `credentials.json` | `{"client_id": "…", "client_secret": "…"}` | Gradle-плагин `ru.cian.huawei-publish-gradle-plugin` (`credentialsPath`), свои скрипты (`jq`, `JSON.parse`). |
+| `dotenv` | `credentials.env` | `HUAWEI_CLIENT_ID='…'` и `HUAWEI_CLIENT_SECRET='…'` | fastlane: `Dotenv.load` в Fastfile и параметры `client_id`, `client_secret` плагина `huawei_appgallery_connect`; оболочка: `. "$APPGALLERY_CONNECT_CREDENTIALS_FILE"`. |
+
+Почему так:
+
+- Плагин fastlane `fastlane-plugin-huawei_appgallery_connect` файла учётных данных не читает: Client ID и секрет передаются параметрами действий, а в примерах они берутся из `ENV['HUAWEI_CLIENT_ID']` и `ENV['HUAWEI_CLIENT_SECRET']`. Класть секрет в окружение `key exec` не будет, поэтому `dotenv` — файл с этими же именами: Fastfile загружает его сам, и значения появляются только в процессе fastlane.
+- Gradle-плагин `ru.cian.huawei-publish-gradle-plugin` читает JSON с полями `client_id` и `client_secret` по пути `credentialsPath` (или флагом `--credentialsPath`). Формат `json` совпадает с ним и с записью профиля в системном хранилище. Других полей в файле нет, чтобы его принимали и строгие разборщики; регион — в `APPGALLERY_CONNECT_REGION`.
+- Файл в формате `agc-apiclient-*.json` (раздел «Server SDK» настроек проекта) `key exec` не создаёт и с `--project-id`: в файле те же два поля. Серверным SDK, которым нужен именно этот формат, передайте скачанный из AppGallery Connect файл.
+- Значения в `dotenv` записываются в одинарных кавычках: ни оболочка, ни dotenv не подставляют в них `$`. Если в Client ID или секрете есть одинарная кавычка, `--format dotenv` завершается ошибкой (без значения) — используйте `json`.
+
+Примеры:
+
+```
+appgallery-connect-mcp key exec --profile work -- sh -c \
+    './gradlew publishHuaweiAppGalleryRelease --credentialsPath "$APPGALLERY_CONNECT_CREDENTIALS_FILE"'
+appgallery-connect-mcp key exec --profile work --format dotenv -- fastlane android deploy
+appgallery-connect-mcp key exec --profile work --env AGC_CREDENTIALS -- ./scripts/upload.sh
+```
+
+Fastfile для второго примера:
+
+```ruby
+Dotenv.load(ENV.fetch('APPGALLERY_CONNECT_CREDENTIALS_FILE'))
+
+lane :deploy do
+  huawei_appgallery_connect(
+    client_id: ENV['HUAWEI_CLIENT_ID'],
+    client_secret: ENV['HUAWEI_CLIENT_SECRET'],
+    app_id: '100000001',
+    apk_path: 'app/build/outputs/apk/release/app-release.apk'
+  )
+end
+```
+
+### Вывод, завершение и сигналы
+
+- В stdout и stderr команды на `***` заменяются секрет и Client ID (как есть и в base64), содержимое файла целиком (и в base64) и access token AppGallery Connect (JWT). Это страховка от случайного вывода, а не граница безопасности: не выводите учётные данные.
+- Файл и каталог удаляются после завершения команды — и при ошибке, и при ненулевом коде, и если команду не удалось запустить, и при прерывании: Ctrl-C команда получает от терминала, SIGTERM и SIGHUP пересылаются ей. От принудительного завершения (`kill -9`) защиты нет: тогда каталог останется во временном каталоге пользователя, доступный только ему.
+- В Windows Ctrl+C и Ctrl+Break команда получает от консоли сама. Команда и запущенные ею процессы работают в объекте задания: когда команда завершилась или закрывается окно консоли (выход из системы, выключение), оставшиеся процессы останавливаются и файл удаляется. Команда без расширения ищется и как `.cmd` и `.bat` (`gradlew` → `gradlew.bat`). Переменные в аргументах подставляет оболочка, которую вы запустите сами, например PowerShell:
+
+```powershell
+appgallery-connect-mcp key exec --profile work -- powershell -NoProfile -Command './gradlew.bat publishHuaweiAppGalleryRelease --credentialsPath $env:APPGALLERY_CONNECT_CREDENTIALS_FILE'
+```
+
+- Код завершения — код команды (при завершении сигналом в Unix — `128 + номер сигнала`).
 
 ## connect
 
@@ -126,6 +292,7 @@ appgallery-connect-mcp connect <claude-code|codex> [--profile <имя>] [--name 
 - Иначе команда печатает, как создать API-клиент, и спрашивает Client ID и секрет, как `auth login`. `--region`, `--client-id`, `--secret-file`, `--secret-stdin`, `--default-app` и `--default-package` значат то же, что у `auth login`; флаги учётных данных заменяют сохранённые.
 - Учётные данные проверяются получением access token; если проверка не прошла, ничего не сохраняется и не регистрируется.
 - `--no-verify` — сохранить новые учётные данные без проверки и не проверять сохранённые.
+- Профиль со входом пользователя (`auth login --oauth`) `connect` не создаёт: сначала войдите через `auth login --oauth`. Для такого профиля `connect` проверяет сохранённый вход (обновляет access token и ищет команду в списке команд, без `--no-verify`), флаги API-клиента и `--region`, не совпадающий с регионом команды, отклоняет.
 - `--silent` — тихий режим для скриптов и агентов: ни вопросов, ни вывода, кроме ошибок. Включает `--yes` (чужая запись с тем же именем всё равно заменяется только с `--force`). Нужны `--client-id` с `--secret-file` или `--secret-stdin`, если у профиля нет рабочих учётных данных.
 
 Регистрация в клиенте:
@@ -153,16 +320,21 @@ appgallery-connect-mcp connect codex --profile ci --client-id <Client ID> --secr
 
 ## serve
 
-Запускает MCP-сервер через stdio. stdout занят протоколом MCP, логи и ошибки запуска — только в stderr.
+Запускает MCP-сервер через stdio. stdout занят протоколом MCP, логи и ошибки запуска — только в stderr. С `--http` сервер слушает сетевой адрес вместо stdio: флаги и устройство HTTP-режима — в [HTTP-режиме и Docker](http.md).
 
 ```
 appgallery-connect-mcp serve [--profile <имя>] [--allow-write] [--allow-destructive]
     [--toolsets <набор,...>|all] [--dynamic-toolsets] [--tools-file <путь>]...
     [--allow-path <каталог>]... [--timeout <секунды>] [--max-response-bytes <байты>]
     [--log-level <уровень>] [--status]
+appgallery-connect-mcp serve --http --access-tokens <путь> [--listen <IP:порт>]
+    [--profile <имя> | --secret-file <путь> [--client-id <ID>]] [--region cn|de|sg|ru]
+    [--allowed-host <имя>]... [--allowed-origin <origin>]... [--max-request-bytes <байты>]
+    [--allow-write] [--allow-destructive] [--toolsets <набор,...>|all] [--tools-file <путь>]...
+    [--allow-path <каталог>]... [--timeout <секунды>] [--max-response-bytes <байты>] [--log-level <уровень>]
 ```
 
-- Учётные данные берутся только из системного хранилища по профилю, регион — из профиля. Access token запрашивается при первом вызове API и хранится только в памяти, поэтому запуск, `initialize` и `tools/list` обходятся без сети. Нет учётных данных или хранилище недоступно — сервер не запускается: код выхода 1, сообщение с подсказкой `auth login --profile` в stderr.
+- Учётные данные берутся только из системного хранилища по профилю, регион — из профиля. Профиль со входом пользователя работает от имени пользователя в команде профиля: заголовки `oauth2Token` и `teamId` ([Вход пользователя](api-client.md#вход-пользователя-oauth-клиент)). Access token запрашивается при первом вызове API и хранится только в памяти, поэтому запуск, `initialize` и `tools/list` обходятся без сети. Нет учётных данных или хранилище недоступно — сервер не запускается: код выхода 1, сообщение с подсказкой `auth login --profile` в stderr.
 - Уровень доступа: по умолчанию только чтение. `--allow-write` регистрирует инструменты, которые создают и меняют данные (сведения о приложении, страница приложения, пакеты, настройки выпуска). `--allow-destructive` (включает запись) — ещё и те, что затрагивают пользователей и деньги или необратимы: отправка на проверку, поэтапный выпуск и время выпуска, публичные ответы на отзывы, товары, цены и акции, удаление данных. Инструменты выше уровня не регистрируются; вызов такого инструмента объясняет, какой флаг нужен.
 - `--toolsets` — наборы через запятую или `all`. По умолчанию — `apps,releases,reviews`. Неизвестный набор — ошибка запуска. Список наборов — `appgallery-connect-mcp toolsets`.
 - `--dynamic-toolsets` (или `dynamic_toolsets = true` в профиле) — наборы по запросу агента: при запуске только `api_search`, `api_request`, `list_toolsets`, `enable_toolset`, `disable_toolset`, наборы из `--toolsets` или профиля (без них — ни одного) ([Динамические наборы](tools.md#динамические-наборы)).
@@ -172,7 +344,7 @@ appgallery-connect-mcp serve [--profile <имя>] [--allow-write] [--allow-destr
 - `--timeout` — таймаут одного запроса к API в секундах (по умолчанию 60).
 - `--max-response-bytes` — предел размера ответа API и результата для агента (по умолчанию 262144 байта, 256 КиБ; к результату после фильтра `jq`). Больший результат — ошибка с подсказкой сузить запрос.
 - `--log-level` — уровень или фильтр логов в stderr, например `info` или `appgallery_connect_mcp_core=debug`; без него — `RUST_LOG`, иначе `warn`.
-- `--status` печатает профиль, имя сервера, сохранены ли учётные данные (без значений), регион и хост, уровень доступа и откуда он взят, наборы, режим динамических наборов, число инструментов, пользовательские инструменты (сколько определено и сколько зарегистрировано), приложения и пакеты по умолчанию, разрешённые каталоги и путь к файлу профилей, и выходит без запуска сервера и без сети.
+- `--status` печатает профиль, имя сервера, сохранены ли учётные данные (без значений), регион и хост, уровень доступа и откуда он взят, наборы, режим динамических наборов, число инструментов, сколько в профиле API-клиентов проектов и каких из них нет в хранилище, пользовательские инструменты (сколько определено и сколько зарегистрировано), приложения и пакеты по умолчанию, разрешённые каталоги и путь к файлу профилей, и выходит без запуска сервера и без сети.
 
 Аргументы инструментов операций — параметры пути, запроса и заголовков с именами, как в справочнике Huawei (`appId`, `lang`, `releaseType`); тело запроса — аргумент `body` (JSON-объект). Ответ — JSON-ответ AppGallery Connect API; ошибки, в том числе с HTTP 200 и ненулевым кодом в теле, возвращаются результатом с `isError: true` ([MCP-инструменты](tools.md#ответы-и-ошибки)).
 

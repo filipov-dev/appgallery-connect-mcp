@@ -360,33 +360,39 @@ async fn links_to_other_hosts_are_not_downloaded() {
 
 #[tokio::test]
 async fn failed_save_after_a_change_is_not_an_error() {
-    // Сертификат создан, но ссылка ведёт на чужой хост: изменение выполнено, повторять
+    // Профиль создан, но ссылка ведёт на чужой хост: изменение выполнено, повторять
     // запрос нельзя — ответ успешный, ссылка скрыта, пометка объясняет.
     let f = fixture().await;
     Mock::given(method("POST"))
-        .and(path("/api/publish/v3/cert"))
+        .and(path("/api/publish/v3/provision"))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({
             "ret": {"code": 0, "msg": "success"},
-            "certInfo": {
-                "id": "cert-1",
-                "certName": "debug",
-                "certDownloadUrl": format!("https://evil.example.com/c.cer?sign={}", signature()),
+            "provisionInfo": {
+                "id": "prov-1",
+                "provisionName": "debug",
+                "provisionDownloadUrl": format!("https://evil.example.com/p.p7b?sign={}", signature()),
             },
         })))
         .expect(1)
         .mount(&f.api)
         .await;
-    let target = f.file("debug.cer");
+    let target = f.file("debug.p7b");
     let result = f
         .call(
-            "create_certificate",
-            json!({"body": {"csr": "csr-text", "certName": "debug", "certType": 1}, "save_to": target}),
+            "create_profile",
+            json!({
+                "body": {"provisionName": "debug", "provisionType": 1, "certId": "cert-1", "appId": APP_ID},
+                "save_to": target,
+            }),
         )
         .await;
     assert_eq!(result.is_error, Some(false), "{}", text(&result));
     let body = json_of(&result);
-    assert_eq!(body["result"]["certInfo"]["id"], "cert-1");
-    assert_eq!(body["result"]["certInfo"]["certDownloadUrl"], "***");
+    assert_eq!(body["result"]["provisionInfo"]["id"], "prov-1");
+    assert_eq!(
+        body["result"]["provisionInfo"]["provisionDownloadUrl"],
+        "***"
+    );
     let note = body["note"].as_str().unwrap();
     assert!(
         note.contains("changed data, but the file was not saved"),

@@ -668,6 +668,7 @@ mod tests {
                 packages: packages.iter().map(|p| (*p).to_owned()).collect(),
             },
             access: AccessLevel::Read,
+            http: false,
         }
     }
 
@@ -993,6 +994,7 @@ mod tests {
                 message: Some(message.into()),
                 operation: None,
                 envelope: RESULT_RET_CODE,
+                service: appgallery_connect_api::ApiService::Connect,
             }))
         };
         assert!(permission_denied(&http(403, None)));

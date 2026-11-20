@@ -21,7 +21,12 @@
 //!    ([`OperationDef::result`]) — ошибка, а не успех.
 //!
 //! Заголовки `Authorization` и `client_id` в параметры не входят: их добавляет
-//! исполнитель.
+//! исполнитель — клиента команды или, для операций с [`OperationDef::project_param`],
+//! клиента проекта.
+//!
+//! Операции HMS IAP ([`OperationDef::service`], [`crate::service::ApiService`]) идут на хост
+//! своего сервиса и подписываются токеном приложения; приложение выбирает параметр
+//! [`ParamLocation::Credential`] (`appId`), который в запрос не уходит.
 
 /// HTTP-метод операции.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -93,6 +98,10 @@ pub enum ParamLocation {
     Header,
     /// JSON-тело запроса; у операции не больше одного такого параметра, его имя — `body`.
     Body,
+    /// Выбирает учётные данные, которыми подписывается запрос, и в запрос не уходит:
+    /// `appId` операций HMS IAP (секрет какого приложения взять). Генератор добавляет его
+    /// сам.
+    Credential,
 }
 
 /// Тип значения параметра в аргументах инструмента.
@@ -149,7 +158,8 @@ pub enum ResponseKind {
 /// `{"error": {"errorCode": 0, "errorMsg": null}}` (PMS).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ResultDef {
-    /// Поле верхнего уровня с объектом результата: `ret` или `error`.
+    /// Поле верхнего уровня с объектом результата: `ret` или `error`. Пустая строка —
+    /// код и текст лежат в корне тела (`responseCode` у HMS IAP).
     pub field: &'static str,
     /// Поле кода внутри объекта результата: `code`, `rtnCode`, `errorCode`.
     /// Успех — число `0` (или строка `"0"`).
@@ -205,6 +215,62 @@ pub struct OperationDef {
     /// MCP-сервер скрывает их значения в ответе агенту, а значения видов
     /// [`SecretKind::DownloadUrl`] и [`SecretKind::FileContent`] умеет сохранить в файл.
     pub secrets: &'static [SecretFieldDef],
+    /// Операции нужен API-клиент уровня проекта (`[[project_credentials]]` дополнения):
+    /// имя параметра с идентификатором проекта (`productId` или `projectId`). Исполнитель
+    /// подписывает запрос токеном клиента этого проекта, а не клиента команды. `None` —
+    /// обычная операция.
+    pub project_param: Option<&'static str>,
+    /// Режимы авторизации, для которых справочник описывает операцию (`x-agc-auth-modes`
+    /// снимка). Пустой список — справочник режимов не называет. Профиль входа пользователя
+    /// (OAuth-клиент) не вызывает операцию, в списке которой нет [`AuthMode::OAuthClient`].
+    pub auth_modes: &'static [AuthMode],
+    /// Сервис, на хост которого уходит запрос (`x-agc-service` снимка).
+    pub service: crate::service::ApiService,
+    /// Поля-строки ответа с JSON внутри (`x-agc-json` снимка; у HMS IAP), по пути, как у
+    /// [`SecretFieldDef::path`]. MCP-сервер отдаёт агенту разобранное значение.
+    pub json_strings: &'static [&'static str],
+    /// Поля ответа, которые MCP-сервер убирает из ответа агенту (`[[omit]]` дополнения).
+    pub omitted: &'static [OmittedFieldDef],
+}
+
+/// Поле ответа, которое MCP-сервер убирает из ответа агенту.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct OmittedFieldDef {
+    /// Путь к полю, как у [`SecretFieldDef::path`].
+    pub path: &'static str,
+    /// Почему поля нет (английский текст для агента).
+    pub reason: &'static str,
+}
+
+/// Режим авторизации запросов Connect API.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum AuthMode {
+    /// API-клиент команды: заголовки `client_id` и `Authorization: Bearer`.
+    ApiClient,
+    /// OAuth-клиент: запрос от имени пользователя, заголовки `teamId` и `oauth2Token`.
+    OAuthClient,
+    /// Service Account (JWT): сервер этот режим не поддерживает.
+    ServiceAccount,
+}
+
+impl AuthMode {
+    /// Имя режима, как в `x-agc-auth-modes`: `api-client`, `oauth-client`, `service-account`.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::ApiClient => "api-client",
+            Self::OAuthClient => "oauth-client",
+            Self::ServiceAccount => "service-account",
+        }
+    }
+
+    /// Название режима для текстов агенту и пользователю (английский).
+    pub fn title(self) -> &'static str {
+        match self {
+            Self::ApiClient => "API client",
+            Self::OAuthClient => "OAuth client (user sign-in)",
+            Self::ServiceAccount => "Service Account",
+        }
+    }
 }
 
 /// Вид секретного поля ответа.
@@ -253,6 +319,23 @@ impl OperationDef {
     /// файл или содержимое файла.
     pub fn saves_file(&self) -> bool {
         self.secrets.iter().any(|secret| secret.kind.savable())
+    }
+
+    /// Нужен ли операции API-клиент уровня проекта ([`Self::project_param`]).
+    pub fn needs_project_credentials(&self) -> bool {
+        self.project_param.is_some()
+    }
+
+    /// Описывает ли справочник операцию для режима `mode`. Операция без
+    /// `x-agc-auth-modes` считается доступной в любом режиме.
+    pub fn supports_auth(&self, mode: AuthMode) -> bool {
+        self.auth_modes.is_empty() || self.auth_modes.contains(&mode)
+    }
+
+    /// Параметр, который выбирает секрет приложения ([`ParamLocation::Credential`]): есть
+    /// у операций HMS IAP.
+    pub fn app_param(&self) -> Option<&'static ParamDef> {
+        self.params_in(ParamLocation::Credential).next()
     }
 
     /// Параметры в расположении `location`.

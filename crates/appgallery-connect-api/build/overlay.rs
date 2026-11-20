@@ -31,6 +31,29 @@ pub struct Overlay {
     /// Поля ответов с секретами и временными ссылками.
     #[serde(default)]
     pub secrets: Vec<SecretRule>,
+    /// Операции, которым нужен API-клиент уровня проекта.
+    #[serde(default)]
+    pub project_credentials: Vec<ProjectCredentialsRule>,
+    /// Поля ответов, которые сервер убирает из ответа агенту.
+    #[serde(default)]
+    pub omit: Vec<OmitRule>,
+}
+
+/// Операции и группы, которые вызываются от имени API-клиента уровня проекта
+/// (`[[project_credentials]]`): серверные API сервисов проекта отказывают клиенту команды.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ProjectCredentialsRule {
+    /// Группы API (`x-agc-group`): все их операции-инструменты.
+    #[serde(default)]
+    pub groups: Vec<String>,
+    /// Отдельные операции (`operationId`).
+    #[serde(default)]
+    pub operations: Vec<String>,
+    /// Параметр с идентификатором проекта. Без ключа — тот из `productId` и `projectId`,
+    /// который есть у операции.
+    #[serde(default)]
+    pub param: Option<String>,
 }
 
 /// Вид секретного поля ответа (`kind` в `[[secrets]]`).
@@ -164,4 +187,16 @@ pub struct Exclude {
 /// Разбирает дополнение; синтаксическая ошибка или неизвестный ключ — `Err` с текстом.
 pub fn parse(raw: &str) -> Result<Overlay, String> {
     toml::from_str(raw).map_err(|err| format!("spec/overlay.toml: {err}"))
+}
+
+/// Поля ответа, которые сервер убирает из ответа агенту (`[[omit]]`): подписи данных,
+/// которые нельзя проверить после разбора JSON-строк, и другие бесполезные агенту поля.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct OmitRule {
+    /// Почему полей нет (английский текст для агента).
+    pub reason: String,
+    pub operations: Vec<String>,
+    /// Пути полей, как в `[[secrets]]`.
+    pub fields: Vec<String>,
 }

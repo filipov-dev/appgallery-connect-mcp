@@ -159,6 +159,7 @@ fn args(client: ClientKind) -> ConnectArgs {
         silent: false,
         secret_argument: None,
         stray: Vec::new(),
+        oauth: false,
     }
 }
 
@@ -817,4 +818,105 @@ fn profile_of_13_characters_fits_the_default_name() {
     assert!(server_name(&args, "production-eu1").is_err());
     args.name = Some("agc-prod".into());
     assert_eq!(server_name(&args, "production-eu1").unwrap(), "agc-prod");
+}
+
+/// Профиль со входом пользователя (как после `auth login --oauth`): `connect` проверяет
+/// вход и пишет конфиг, но не трогает вход и отклоняет флаги API-клиента.
+#[tokio::test]
+async fn user_sign_in_profile_is_connected_with_its_stored_sign_in() {
+    use crate::profiles::ProfileKind;
+    use crate::testing::{mount_user_sign_in, oauth_client_id, refresh_token, sign_in};
+    use appgallery_connect_api::Region;
+    use serde_json::json;
+    use wiremock::matchers::{body_string_contains, method, path};
+    use wiremock::{Mock, ResponseTemplate};
+
+    let mut fx = Fixture::new().await;
+    // Обновление по старому refresh token выдаёт новый: его нужно сохранить.
+    Mock::given(method("POST"))
+        .and(path("/oauth2/v3/token"))
+        .and(body_string_contains(format!(
+            "refresh_token={}",
+            refresh_token("31")
+        )))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "access_token": crate::testing::user_access_token(),
+            "expires_in": 3600,
+            "refresh_token": refresh_token("32"),
+        })))
+        .mount(&fx.server)
+        .await;
+    mount_user_sign_in(
+        &fx.server,
+        "32",
+        json!([{"id": "5100", "name": "Home", "siteId": 8}]),
+    )
+    .await;
+    fx.store.set_oauth(DEFAULT_PROFILE, &sign_in("31")).unwrap();
+    fx.repo
+        .upsert(
+            DEFAULT_PROFILE,
+            ProfileSettings {
+                kind: ProfileKind::Oauth,
+                team_id: Some("5100".into()),
+                region: Region::Ru,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+
+    // Флаги API-клиента и чужой регион отклоняются до вопросов.
+    let err = fx
+        .connect(&with_flags(args(ClientKind::Codex), &fx, GOOD))
+        .await
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains("signs in as a HUAWEI ID user"), "{err}");
+    let mut wrong_region = args(ClientKind::Codex);
+    wrong_region.region = Some(Region::Cn);
+    let err = fx.connect(&wrong_region).await.unwrap_err().to_string();
+    assert!(err.contains("site of its team (ru)"), "{err}");
+    let mut oauth = args(ClientKind::Codex);
+    oauth.oauth = true;
+    let err = fx.connect(&oauth).await.unwrap_err().to_string();
+    assert!(err.contains("auth login --oauth"), "{err}");
+    assert!(fx.codex_config().is_none());
+
+    let mut run = args(ClientKind::Codex);
+    run.yes = true;
+    fx.connect(&run).await.unwrap();
+    let out = fx.ui.text();
+    assert!(out.contains("signs in as a HUAWEI ID user"), "{out}");
+    assert!(out.contains("The stored sign-in works"), "{out}");
+    assert!(!out.contains(&oauth_client_id("31")), "{out}");
+    let config = fx.codex_config().unwrap();
+    assert_eq!(
+        codex_entry(&config, "appgallery").1,
+        ["serve", "--profile", "default", "--dynamic-toolsets"]
+    );
+    let settings = fx.settings(DEFAULT_PROFILE);
+    assert_eq!(settings.kind, ProfileKind::Oauth);
+    assert_eq!(settings.team_id.as_deref(), Some("5100"));
+    // Повёрнутый refresh token сохранён, API-клиента у профиля нет.
+    let stored = fx.store.get_oauth(DEFAULT_PROFILE).unwrap();
+    assert_eq!(stored.expose_refresh_token(), refresh_token("32"));
+    assert!(fx.store.get(DEFAULT_PROFILE).is_err());
+    for text in [
+        out,
+        config.clone(),
+        fs::read_to_string(fx.repo.path()).unwrap(),
+    ] {
+        assert!(!text.contains(&refresh_token("31")), "{text}");
+        assert!(!text.contains(&refresh_token("32")), "{text}");
+    }
+
+    // Без записи входа в keychain — ошибка с подсказкой, ничего не меняется.
+    fx.store.delete_oauth(DEFAULT_PROFILE).unwrap();
+    let err = fx.connect(&run).await.unwrap_err().to_string();
+    assert!(
+        err.contains("auth login --oauth --profile default"),
+        "{err}"
+    );
+    assert!(err.contains("nothing was changed"), "{err}");
+    assert_eq!(fx.codex_config().unwrap(), config);
 }

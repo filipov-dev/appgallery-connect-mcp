@@ -4,6 +4,8 @@
 //! - [`server`] — обработчик `rmcp` ([`AppGalleryServer`]) и инструкции для агента;
 //! - [`registry`] — какие инструменты регистрируются при заданных [`ServerOptions`];
 //! - [`validate`] — проверка аргументов по JSON Schema инструмента;
+//! - [`decode`] — разбор JSON-строк и удаление лишних полей ответа операции (HMS IAP) до
+//!   вырезания секретов;
 //! - [`redact`] — вырезание секретов из ответов (поля операций по таблице спецификации,
 //!   поля по имени и значения по виду);
 //! - [`files`] — политика локальных файлов ([`files::FilePolicy`]) и `save_to`;
@@ -17,16 +19,21 @@
 //!   [`ServerOptions::composite_tools`] наравне с инструментами операций;
 //! - [`search`] — `api_search`: поиск по всем операциям (со словарём русских слов);
 //! - [`request`] — `api_request`: запрос к любому пути API с уровнем доступа по таблице
-//!   операций.
+//!   операций;
+//! - [`purchases`] — раздел инструкций о покупках в приложении (набор `purchases`, HMS IAP);
+//! - [`prompts`] — MCP-промпты для частых сценариев (`prompts/list`, `prompts/get`).
 //!
-//! Транспорт (stdio) и CLI живут в крейте `appgallery-connect-mcp`, клиент API —
+//! Транспорты (stdio и HTTP) и CLI живут в крейте `appgallery-connect-mcp`, клиент API —
 //! в `appgallery-connect-api`.
 
 pub mod composite;
 pub mod custom;
+pub mod decode;
 pub mod error;
 pub mod files;
 pub mod jq;
+pub mod prompts;
+pub mod purchases;
 pub mod redact;
 pub mod registry;
 pub mod request;
@@ -37,11 +44,12 @@ pub mod toolsets;
 pub mod validate;
 
 pub use appgallery_connect_api;
-pub use composite::{CompositeTool, LocalFiles, MemoryVault, NoVault, SecretVault};
+pub use composite::{CompositeTool, HttpNoVault, LocalFiles, MemoryVault, NoVault, SecretVault};
 pub use custom::{CustomTool, CustomToolDef, CustomToolsFile};
 pub use error::ToolError;
 pub use files::FilePolicy;
 pub use jq::{JqFilter, JqRunner};
+pub use prompts::{PromptDef, PromptSetup};
 pub use registry::{RegisteredTool, ToolKind, ToolRegistry, access_name};
 pub use server::{AppGalleryServer, Services};
 pub use toolsets::{
@@ -107,8 +115,20 @@ pub struct ServerOptions {
     pub jq: JqRunner,
     /// Дополнительные каталоги для файловых аргументов инструментов (`serve --allow-path`).
     /// Вместе с рабочим и временным каталогом — корни [`files::FilePolicy`]; каталог должен
-    /// существовать, иначе сервер не создаётся.
+    /// существовать, иначе сервер не создаётся. В HTTP-режиме ([`Self::http`]) — единственные
+    /// корни.
     pub allowed_paths: Vec<PathBuf>,
+    /// Промпты сервера (`prompts/list`, `prompts/get`). По умолчанию — [`prompts::all`];
+    /// регистрируются те, что доступны при [`Self::max_access`] ([`prompts::available`]).
+    /// Если таких нет, capability `prompts` не объявляется.
+    pub prompts: Vec<PromptDef>,
+    /// Сервер работает по HTTP на другой машине (`serve --http`): учётные данные и уровень
+    /// доступа задаёт оператор сервера, а не пользователь агента. Локальные файлы — только
+    /// [`Self::allowed_paths`] (рабочий и временный каталоги сервера к клиенту отношения не
+    /// имеют); без них файлов нет, и составные инструменты с обязательным файловым аргументом
+    /// не регистрируются. Инструкции для агента говорят об операторе сервера и каталогах на
+    /// сервере вместо флагов запуска, профиля и команд CLI.
+    pub http: bool,
 }
 
 impl Default for ServerOptions {
@@ -124,7 +144,17 @@ impl Default for ServerOptions {
             custom_tools: Vec::new(),
             jq: JqRunner::default(),
             allowed_paths: Vec::new(),
+            prompts: prompts::all(),
+            http: false,
         }
+    }
+}
+
+impl ServerOptions {
+    /// Доступны ли инструментам локальные файлы: всегда в stdio, в HTTP-режиме — только с
+    /// [`Self::allowed_paths`].
+    pub fn local_files(&self) -> bool {
+        !self.http || !self.allowed_paths.is_empty()
     }
 }
 

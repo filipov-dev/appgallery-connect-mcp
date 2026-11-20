@@ -29,6 +29,7 @@ use super::listing::{
 };
 use super::{CompositeTool, Context, ToolFuture};
 use crate::error::{ToolError, describe_api_error};
+use crate::registry::{access_action, access_hint, access_requirement};
 
 /// Имя инструмента.
 pub const NAME: &str = "listing_apply";
@@ -316,10 +317,11 @@ async fn apply(ctx: &Context, args: Value) -> Result<Value, ToolError> {
     let apply_app_info = bool_arg(&args, "apply_app_info")?.unwrap_or(true);
     let release_type = release_type(&args)?;
     if !dry_run && !ctx.access.allows(AccessLevel::Write) {
-        return Err(ToolError::new(
-            "applying the listing needs a server started with --allow-write; dry_run works \
-             without",
-        ));
+        return Err(ToolError::new(format!(
+            "applying the listing needs {}; dry_run works without. {}",
+            access_requirement(AccessLevel::Write, ctx.http),
+            access_hint(AccessLevel::Write, ctx.http),
+        )));
     }
 
     let local = listing::read_listing(ctx, dir)?;
@@ -332,11 +334,12 @@ async fn apply(ctx: &Context, args: Value) -> Result<Value, ToolError> {
         .any(|action| matches!(action, Action::Delete { .. }));
     let can_delete = ctx.access.allows(AccessLevel::Destructive);
     if deletes && !can_delete && !dry_run {
-        return Err(ToolError::new(
-            "deleting languages needs a server started with --allow-destructive; nothing was \
-             sent. Ask the user to restart the server with --allow-destructive, or call again \
-             without delete_missing_languages to apply the other changes",
-        ));
+        return Err(ToolError::new(format!(
+            "deleting languages needs {}; nothing was sent: {}, or call again without \
+             delete_missing_languages to apply the other changes",
+            access_requirement(AccessLevel::Destructive, ctx.http),
+            access_action(AccessLevel::Destructive, ctx.http),
+        )));
     }
 
     let mut result = Map::new();
@@ -355,18 +358,17 @@ async fn apply(ctx: &Context, args: Value) -> Result<Value, ToolError> {
     }
     let mut notes = Vec::new();
     if !plan.missing.is_empty() && !delete_missing {
-        notes.push(
+        notes.push(format!(
             "the languages in not_in_directory stay as they are; pass \
-             delete_missing_languages to delete them (needs --allow-destructive)"
-                .to_owned(),
-        );
+             delete_missing_languages to delete them (needs {})",
+            access_requirement(AccessLevel::Destructive, ctx.http),
+        ));
     }
     if deletes && !can_delete {
-        notes.push(
-            "deleting languages needs a server started with --allow-destructive; applying this \
-             plan is refused on this server"
-                .to_owned(),
-        );
+        notes.push(format!(
+            "deleting languages needs {}; applying this plan is refused here",
+            access_requirement(AccessLevel::Destructive, ctx.http),
+        ));
     }
     if !notes.is_empty() {
         result.insert("notes".into(), json!(notes));
@@ -603,6 +605,46 @@ mod tests {
                 "privacyPolicy": "https://example.com/privacy",
             })]
         );
+    }
+
+    #[tokio::test]
+    async fn http_mode_asks_for_an_access_token_instead_of_flags() {
+        let server = MockServer::start().await;
+        mount_app(&server).await;
+        let dir = tempfile::tempdir().unwrap();
+        exported(&server, dir.path()).await;
+        std::fs::remove_dir_all(dir.path().join("listing/ru-RU")).unwrap();
+
+        let mut read = context(&server, dir.path(), AccessLevel::Read);
+        read.http = true;
+        let err = apply(&read, json!({"dir": "listing", "dry_run": false}))
+            .await
+            .unwrap_err();
+        let message = err.message();
+        assert!(
+            message.contains("access token with the write level"),
+            "{message}"
+        );
+        assert!(message.contains("server operator"), "{message}");
+        assert!(!message.contains("--allow-"), "{message}");
+
+        let mut write = context(&server, dir.path(), AccessLevel::Write);
+        write.http = true;
+        let args = json!({"dir": "listing", "delete_missing_languages": true});
+        let plan = apply(&write, args.clone()).await.unwrap();
+        let notes = plan["notes"].to_string();
+        assert!(
+            notes.contains("access token with the destructive level"),
+            "{notes}"
+        );
+        assert!(!notes.contains("--allow-"), "{notes}");
+        let mut run = args;
+        run["dry_run"] = json!(false);
+        let err = apply(&write, run).await.unwrap_err();
+        let message = err.message();
+        assert!(message.contains("server operator"), "{message}");
+        assert!(!message.contains("--allow-"), "{message}");
+        assert!(writes(&server).await.is_empty());
     }
 
     #[tokio::test]

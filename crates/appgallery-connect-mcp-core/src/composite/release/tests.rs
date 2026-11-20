@@ -56,6 +56,7 @@ fn context(server: &MockServer, region: Region) -> Context {
             packages: Vec::new(),
         },
         access: AccessLevel::Destructive,
+        http: false,
     }
 }
 

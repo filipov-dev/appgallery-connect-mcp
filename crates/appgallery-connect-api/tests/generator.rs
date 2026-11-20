@@ -182,6 +182,19 @@ fn excluded_and_external_operations_take_no_names() {
 }
 
 #[test]
+fn iap_kit_operations_must_not_be_callable() {
+    // REST API IAP Kit: подписи JWT ES256 в сервере нет, вызывать такие операции нельзя.
+    let errors = errors_of(&patched(
+        "    \"iapkit.refundResult.send\",\n]\ncallable = false\n",
+        "    \"iapkit.refundResult.send\",\n]\n",
+    ));
+    assert_error(
+        &errors,
+        &["iapkit.orderStatus.query", "IAP Kit", "callable = false"],
+    );
+}
+
+#[test]
 fn external_operations_must_not_be_callable() {
     let errors = errors_of(&patched(
         "operations = [\"upload.file.put\", \"upload.chunk.put\"]\ncallable = false\n",
@@ -385,10 +398,13 @@ fn secret_fields_are_checked_against_the_response_schema() {
     // Объект вместо массива и массив вместо строки.
     let errors = errors_of(&with_secret(
         "download-url",
-        "\"provisioning.cert.create\"",
-        "\"certInfo[].certDownloadUrl\", \"certList\"",
+        "\"provisioning.profile.create\"",
+        "\"provisionInfo[].provisionDownloadUrl\"",
     ));
-    assert_error(&errors, &["certInfo[].certDownloadUrl", "не массив"]);
+    assert_error(
+        &errors,
+        &["provisionInfo[].provisionDownloadUrl", "не массив"],
+    );
     let errors = errors_of(&with_secret(
         "download-url",
         "\"provisioning.cert.list\"",
@@ -461,4 +477,220 @@ fn renamed_secret_field_in_the_spec_is_an_error() {
         &errors,
         &["reports.iap.export", "fileURL", "нет поля fileURL"],
     );
+}
+
+/// Раздел `[[project_credentials]]` в конец дополнения.
+fn with_project_rule(body: &str) -> String {
+    format!("{OVERLAY}\n[[project_credentials]]\n{body}\n")
+}
+
+/// Снимок, в котором операции проектов описаны и для режима API-клиента (в настоящем
+/// снимке у них только OAuth-клиент и Service Account).
+fn spec_with_api_client_projects() -> Value {
+    let mut spec = spec().clone();
+    let paths = spec
+        .get_mut("paths")
+        .and_then(Value::as_object_mut)
+        .expect("paths");
+    for item in paths.values_mut() {
+        for op in item.as_object_mut().expect("путь").values_mut() {
+            if op.get("x-agc-group") == Some(&json!("project")) {
+                op["x-agc-auth-modes"] = json!(["api-client"]);
+            }
+        }
+    }
+    spec
+}
+
+#[test]
+fn project_credentials_mark_operations_with_the_project_parameter() {
+    // В дополнении клиент проекта нужен четырём операциям Remote Configuration и двум
+    // операциям App Linking (заголовок `productId`).
+    assert_eq!(BUILT.matches("project_param: Some(").count(), 6);
+    assert_eq!(
+        BUILT.matches("project_param: Some(\"productId\")").count(),
+        6
+    );
+    let spec = spec_with_api_client_projects();
+    let overlay =
+        with_project_rule("operations = [\"project.project.get\", \"project.service.list\"]");
+    let output = generate::generate(&spec, &overlay::parse(&overlay).expect("дополнение"));
+    assert!(output.errors.is_empty(), "{:?}", output.errors);
+    // Параметр пути и параметр запроса `projectId`; остальные операции без пометки.
+    assert_eq!(
+        output
+            .code
+            .matches("project_param: Some(\"projectId\")")
+            .count(),
+        2
+    );
+    assert!(output.code.contains("Project-level API client"));
+    let explicit =
+        with_project_rule("operations = [\"project.project.get\"]\nparam = \"projectId\"");
+    let output = generate::generate(&spec, &overlay::parse(&explicit).expect("дополнение"));
+    assert!(output.errors.is_empty(), "{:?}", output.errors);
+}
+
+#[test]
+fn project_credentials_rules_are_checked() {
+    let spec = spec_with_api_client_projects();
+    let errors_with = |body: &str| {
+        let output = generate::generate(
+            &spec,
+            &overlay::parse(&with_project_rule(body)).expect("дополнение"),
+        );
+        assert!(output.code.is_empty());
+        output.errors
+    };
+    // В группе есть операции без параметра проекта.
+    let errors = errors_with("groups = [\"project\"]");
+    assert_error(
+        &errors,
+        &["project.team.list", "нет параметра productId или projectId"],
+    );
+    // Справочник не описывает операцию для режима API-клиента.
+    let errors = errors_of(&with_project_rule("operations = [\"project.project.get\"]"));
+    assert_error(&errors, &["project.project.get", "без api-client"]);
+    // Необязательный параметр, тело, параметр, которого нет.
+    let errors = errors_with("operations = [\"project.project.get\"]\nparam = \"queryFlag\"");
+    assert_error(&errors, &["queryFlag", "обязательным"]);
+    let errors = errors_with("operations = [\"project.project.get\"]\nparam = \"nope\"");
+    assert_error(&errors, &["нет параметра nope"]);
+    // Неизвестные группа и операция, исключённая операция, повтор, пустое правило.
+    let errors = errors_with("groups = [\"nope\"]");
+    assert_error(&errors, &["группы nope нет"]);
+    let errors = errors_with("operations = [\"project.missing.get\"]");
+    assert_error(&errors, &["project.missing.get", "нет в снимке"]);
+    let errors = errors_with("operations = [\"auth.token.create\"]");
+    assert_error(&errors, &["auth.token.create", "исключена"]);
+    let errors = errors_with(
+        "operations = [\"project.project.get\"]\n\n[[project_credentials]]\noperations = [\"project.project.get\"]",
+    );
+    assert_error(&errors, &["project.project.get", "дважды"]);
+    let errors = errors_with("param = \"projectId\"");
+    assert_error(&errors, &["нужны groups или operations"]);
+    // Неизвестный ключ — ошибка разбора.
+    assert!(overlay::parse(&with_project_rule("operations = []\nextra = 1")).is_err());
+}
+
+#[test]
+fn iap_service_operations_are_checked() {
+    // Неизвестный сервис.
+    let errors = spec_errors(|spec| {
+        spec["paths"]["/api/publish/v2/app-info"]["get"]["x-agc-service"] = json!("iap");
+    });
+    assert_error(&errors, &["publishing.appInfo.get", "x-agc-service"]);
+    // У операции IAP путь без `/api/`.
+    let errors = spec_errors(|spec| {
+        spec["paths"]["/api/publish/v2/app-info"]["get"]["x-agc-service"] = json!("iap-orders");
+        spec["paths"]["/api/publish/v2/app-info"]["put"]["x-agc-service"] = json!("iap-orders");
+    });
+    assert_error(&errors, &["/api/publish/v2/app-info", "HMS IAP"]);
+    // У пути Connect API — `/api/`; разные сервисы у одного пути.
+    let errors = spec_errors(|spec| {
+        let item = spec["paths"]["/api/publish/v2/app-info"].clone();
+        spec["paths"]["/applications/v2/x"] = item;
+    });
+    assert_error(&errors, &["/applications/v2/x", "/api/"]);
+    let errors = spec_errors(|spec| {
+        spec["paths"]["/api/publish/v2/app-info"]["get"]["x-agc-service"] = json!("iap-orders");
+    });
+    assert_error(
+        &errors,
+        &["/api/publish/v2/app-info", "разные x-agc-service"],
+    );
+    // Свой параметр `appId` у операции IAP: его добавляет генератор.
+    let errors = spec_errors(|spec| {
+        let mut item = spec["paths"]["/api/publish/v2/app-info"].clone();
+        if let Some(map) = item.as_object_mut() {
+            map.retain(|method, _| method == "get");
+        }
+        item["get"]["x-agc-service"] = json!("iap-orders");
+        item["get"]["operationId"] = json!("publishing.iapThing.get");
+        spec["paths"]["/applications/v2/x"] = item;
+    });
+    assert_error(&errors, &["publishing.iapThing.get", "appId"]);
+    // Корневой конверт результата: пустым может быть только `field`.
+    let errors = spec_errors(|spec| {
+        let op = &mut spec["paths"]["/api/publish/v2/app-info"]["get"];
+        op["x-agc-result"] = json!({"field": "", "codeField": "", "messageField": "m"});
+    });
+    assert_error(&errors, &["publishing.appInfo.get", "x-agc-result"]);
+}
+
+/// Раздел `[[omit]]` в конец дополнения.
+fn with_omit(operations: &str, fields: &str) -> String {
+    format!(
+        "{OVERLAY}\n[[omit]]\nreason = \"test reason.\"\noperations = {operations}\nfields = {fields}\n"
+    )
+}
+
+#[test]
+fn json_strings_come_from_the_spec() {
+    // Пути полей с `x-agc-json` попадают в таблицу.
+    assert!(BUILT.contains("json_strings: &[\"purchaseTokenData\"],"));
+    assert!(BUILT.contains("json_strings: &[\"cancelledPurchaseList\"],"));
+    // `x-agc-json` только у строки и только со схемой-объектом.
+    let path = "/applications/v2/purchases/cancelledList";
+    let errors = spec_errors(|spec| {
+        let field = &mut spec["paths"][path]["post"]["responses"]["200"]["content"]["application/json"]
+            ["schema"]["properties"]["continuationToken"];
+        field["type"] = json!("integer");
+        field["x-agc-json"] = json!({"type": "object"});
+    });
+    assert_error(
+        &errors,
+        &[
+            "orders.cancelledPurchase.list",
+            "x-agc-json",
+            "continuationToken",
+            "строкой",
+        ],
+    );
+    let errors = spec_errors(|spec| {
+        spec["paths"][path]["post"]["responses"]["200"]["content"]["application/json"]["schema"]
+            ["properties"]["cancelledPurchaseList"]["x-agc-json"] = json!("array");
+    });
+    assert_error(&errors, &["cancelledPurchaseList", "схемой-объектом"]);
+}
+
+#[test]
+fn omitted_fields_are_checked() {
+    let errors = errors_of(&with_omit(
+        "[\"orders.purchase.confirm\"]",
+        "[\"dataSignature\"]",
+    ));
+    assert_error(
+        &errors,
+        &[
+            "[[omit]] orders.purchase.confirm",
+            "dataSignature",
+            "нет поля",
+        ],
+    );
+    // Поле — уже разбираемая строка.
+    let errors = errors_of(&with_omit(
+        "[\"orders.purchaseToken.verify\"]",
+        "[\"purchaseTokenData\"]",
+    ));
+    assert_error(
+        &errors,
+        &["[[omit]] orders.purchaseToken.verify", "уже указано"],
+    );
+    // Повтор того же поля другим правилом.
+    let errors = errors_of(&with_omit(
+        "[\"subscriptions.purchase.get\"]",
+        "[\"dataSignature\"]",
+    ));
+    assert_error(
+        &errors,
+        &["subscriptions.purchase.get", "dataSignature", "уже указано"],
+    );
+    let errors = errors_of(&with_omit("[\"orders.missing.get\"]", "[\"x\"]"));
+    assert_error(&errors, &["[[omit]]", "orders.missing.get", "нет в снимке"]);
+    let errors = errors_of(&format!(
+        "{OVERLAY}\n[[omit]]\nreason = \" \"\noperations = []\nfields = []\n"
+    ));
+    assert_error(&errors, &["[[omit]]", "нет reason"]);
+    assert_error(&errors, &["[[omit]]", "нужны operations и fields"]);
 }

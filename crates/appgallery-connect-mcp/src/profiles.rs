@@ -2,8 +2,16 @@
 //! API-клиента — в системном хранилище под именем профиля ([`KeyringStore`]).
 //!
 //! Один профиль — один API-клиент одного кабинета AppGallery Connect. В файле профилей нет
-//! ни секрета, ни идентификатора клиента: только регион, приложения по умолчанию и
-//! настройки доступа для `connect` и `serve`.
+//! ни секрета, ни идентификатора клиента: только регион, приложения по умолчанию,
+//! настройки доступа для `connect` и `serve` и список проектов, для которых в хранилище
+//! лежат API-клиенты уровня проекта (вторые учётные данные того же профиля, запись
+//! `<профиль>/project/<projectId>`; хранилище не умеет перечислять записи) и список
+//! приложений с секретом приложения в хранилище (запись `<профиль>/app/<appId>`: подпись
+//! серверных API покупок в приложении).
+//!
+//! Профиль может работать и от имени пользователя (режим OAuth-клиента, `type = "oauth"`):
+//! тогда в хранилище лежит вход пользователя (запись `<профиль>/oauth`: OAuth-клиент и
+//! refresh token), а в файле — команда (`team_id`), от имени которой идут запросы.
 //!
 //! [`KeyringStore`]: appgallery_connect_api::KeyringStore
 
@@ -12,8 +20,10 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, bail};
+use appgallery_connect_api::user_oauth::validate_team_id;
 use appgallery_connect_api::{
-    ApiClient, ApiClientCredentials, ClientConfig, CredentialStore, Region, StoreError,
+    ApiClient, ApiClientCredentials, AppCredentials, ClientConfig, CredentialStore, KeyringStore,
+    OAuthCredentials, OAuthSession, ProjectCredentials, Region, StoreError,
 };
 use serde::{Deserialize, Serialize};
 
@@ -38,10 +48,41 @@ const MAX_PACKAGE_LEN: usize = 255;
 /// Максимальная длина `appId` (в AppGallery Connect — десятичное число).
 const MAX_APP_ID_LEN: usize = 20;
 
+/// Как профиль входит в AppGallery Connect.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ProfileKind {
+    /// API-клиент команды (`client_id` и секрет).
+    #[default]
+    ApiClient,
+    /// Пользователь HUAWEI ID через OAuth-клиент (`auth login --oauth`).
+    Oauth,
+}
+
+impl ProfileKind {
+    fn is_api_client(&self) -> bool {
+        *self == Self::ApiClient
+    }
+
+    /// Название для вывода.
+    pub fn title(self) -> &'static str {
+        match self {
+            Self::ApiClient => "API client",
+            Self::Oauth => "user sign-in (OAuth client)",
+        }
+    }
+}
+
 /// Настройки профиля. Учётных данных здесь нет.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct ProfileSettings {
+    /// Способ входа: API-клиент (по умолчанию, в файл не пишется) или вход пользователя.
+    #[serde(rename = "type", skip_serializing_if = "ProfileKind::is_api_client")]
+    pub kind: ProfileKind,
+    /// Команда пользователя (`teamId`) для входа пользователя.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub team_id: Option<String>,
     /// Регион кабинета: от него зависит хост API.
     #[serde(with = "region_slug")]
     pub region: Region,
@@ -63,6 +104,14 @@ pub struct ProfileSettings {
     /// Наборы инструментов включаются агентом по запросу (`serve --dynamic-toolsets`).
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub dynamic_toolsets: bool,
+    /// Проекты с API-клиентом уровня проекта в хранилище (`auth project add`), по
+    /// порядку. Только идентификаторы проектов: учётные данные — в хранилище.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub projects: Vec<String>,
+    /// Приложения с секретом приложения в хранилище (`auth app-secret set`), по порядку.
+    /// Только App ID: секреты — в хранилище.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub app_secrets: Vec<String>,
 }
 
 impl ProfileSettings {
@@ -71,9 +120,14 @@ impl ProfileSettings {
         self.allow_write || self.allow_destructive
     }
 
-    /// Приводит флаги доступа к действующему уровню: `allow_destructive` включает `allow_write`.
+    /// Приводит флаги доступа к действующему уровню (`allow_destructive` включает
+    /// `allow_write`), а список проектов — к порядку без повторов.
     pub fn normalized(mut self) -> Self {
         self.allow_write = self.writes_allowed();
+        self.projects.sort();
+        self.projects.dedup();
+        self.app_secrets.sort();
+        self.app_secrets.dedup();
         self
     }
 }
@@ -264,8 +318,19 @@ pub fn validate_profile_name(name: &str) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Профиль, готовый к работе: настройки и учётные данные API-клиента. `Debug` учётных
-/// данных скрыт (см. [`ApiClientCredentials`]).
+/// Учётные данные профиля: API-клиент или вход пользователя с командой. `Debug` значений
+/// не раскрывает.
+#[derive(Debug, Clone)]
+pub enum ProfileAuth {
+    ApiClient(ApiClientCredentials),
+    User {
+        credentials: OAuthCredentials,
+        team_id: String,
+    },
+}
+
+/// Профиль, готовый к работе: настройки и учётные данные (API-клиент или вход
+/// пользователя). `Debug` учётных данных скрыт.
 // Загрузку профиля целиком используют будущие `serve` и `connect`; `auth status` проверяет
 // части профиля по отдельности, чтобы показать каждую проблему.
 #[allow(dead_code)]
@@ -273,14 +338,40 @@ pub fn validate_profile_name(name: &str) -> anyhow::Result<()> {
 pub struct Profile {
     pub name: String,
     pub settings: ProfileSettings,
-    pub credentials: ApiClientCredentials,
+    pub auth: ProfileAuth,
+    /// API-клиенты проектов из `settings.projects`, которые нашлись в хранилище.
+    pub projects: Vec<ProjectCredentials>,
+    /// Проекты из `settings.projects` без пригодной записи в хранилище: их операции
+    /// вернут ошибку с подсказкой `auth project add`. Текст — для предупреждения в stderr.
+    pub project_problems: Vec<String>,
+    /// Секреты приложений из `settings.app_secrets`, которые нашлись в хранилище.
+    pub apps: Vec<AppCredentials>,
+    /// Приложения из `settings.app_secrets` без пригодной записи: их операции IAP вернут
+    /// ошибку с подсказкой `auth app-secret set`. Текст — для предупреждения в stderr.
+    pub app_problems: Vec<String>,
 }
 
 #[allow(dead_code)]
 impl Profile {
     /// Настройки клиента API для региона и учётных данных профиля.
     pub fn client_config(&self) -> ClientConfig {
-        ClientConfig::new(self.settings.region, Some(self.credentials.clone()))
+        let region = self.settings.region;
+        let mut config = match &self.auth {
+            ProfileAuth::ApiClient(credentials) => {
+                ClientConfig::new(region, Some(credentials.clone()))
+            }
+            ProfileAuth::User {
+                credentials,
+                team_id,
+            } => ClientConfig::with_oauth(
+                region,
+                OAuthSession::new(credentials.clone(), Some(team_id.clone())),
+            ),
+        };
+        config.projects = self.projects.clone();
+        config.apps = self.apps.clone();
+        config.profile = Some(self.name.clone());
+        config
     }
 
     /// Клиент AppGallery Connect API профиля. Токен получается при первом запросе.
@@ -299,22 +390,149 @@ pub fn load_profile_with(
 ) -> anyhow::Result<Profile> {
     validate_profile_name(name)?;
     let settings = repo.get(name)?.unwrap_or_default();
-    let credentials = match store.get(name) {
-        Ok(credentials) => credentials,
-        Err(err @ (StoreError::NotFound { .. } | StoreError::Corrupted { .. })) => {
-            return Err(err.into());
-        }
-        Err(err) => {
-            return Err(anyhow::Error::new(err).context(format!(
-                "cannot load the API client credentials of profile `{name}`"
-            )));
+    let auth = match settings.kind {
+        ProfileKind::ApiClient => match store.get(name) {
+            Ok(credentials) => ProfileAuth::ApiClient(credentials),
+            Err(err @ (StoreError::NotFound { .. } | StoreError::Corrupted { .. })) => {
+                return Err(err.into());
+            }
+            Err(err) => {
+                return Err(anyhow::Error::new(err).context(format!(
+                    "cannot load the API client credentials of profile `{name}`"
+                )));
+            }
+        },
+        ProfileKind::Oauth => {
+            let team_id = profile_team(name, &settings)?;
+            match store.get_oauth(name) {
+                Ok(credentials) => ProfileAuth::User {
+                    credentials,
+                    team_id,
+                },
+                Err(
+                    err @ (StoreError::OAuthNotFound { .. } | StoreError::OAuthCorrupted { .. }),
+                ) => {
+                    return Err(err.into());
+                }
+                Err(err) => {
+                    return Err(anyhow::Error::new(err)
+                        .context(format!("cannot load the user sign-in of profile `{name}`")));
+                }
+            }
         }
     };
+    let (projects, project_problems) = load_projects(store, name, &settings.projects)?;
+    let (apps, app_problems) = load_app_secrets(store, name, &settings.app_secrets)?;
     Ok(Profile {
         name: name.to_owned(),
         settings,
-        credentials,
+        auth,
+        projects,
+        project_problems,
+        apps,
+        app_problems,
     })
+}
+
+/// Команда профиля со входом пользователя: без неё запросы не имеют смысла.
+pub fn profile_team(name: &str, settings: &ProfileSettings) -> anyhow::Result<String> {
+    let Some(team) = settings.team_id.as_deref() else {
+        bail!(
+            "profile `{name}` signs in as a user but has no team in {PROFILES_FILE}; sign in \
+             again with `appgallery-connect-mcp auth login --oauth --profile {name}`"
+        );
+    };
+    validate_team_id(team).map_err(|err| {
+        anyhow::anyhow!(
+            "invalid team_id of profile `{name}` in {PROFILES_FILE}: {err}; sign in again with \
+             `appgallery-connect-mcp auth login --oauth --profile {name}`"
+        )
+    })?;
+    Ok(team.to_owned())
+}
+
+/// Сохраняет новый refresh token входа пользователя в системное хранилище, если сервер
+/// входа выдаст его при обновлении access token (`serve`). У API-клиента ничего не делает.
+pub fn save_rotated_sign_in(config: &mut ClientConfig, profile: &str) {
+    if let Some(session) = config.oauth.as_mut() {
+        let profile = profile.to_owned();
+        session.sink = Some(std::sync::Arc::new(
+            move |credentials: &OAuthCredentials| {
+                KeyringStore
+                    .set_oauth(&profile, credentials)
+                    .map_err(|err| err.to_string())
+            },
+        ));
+    }
+}
+
+/// Секреты приложений профиля из хранилища. Нет записи или запись испорчена — приложение
+/// пропускается с текстом проблемы; недоступное хранилище — ошибка.
+pub fn load_app_secrets(
+    store: &dyn CredentialStore,
+    profile: &str,
+    app_ids: &[String],
+) -> anyhow::Result<(Vec<AppCredentials>, Vec<String>)> {
+    let mut apps = Vec::new();
+    let mut problems = Vec::new();
+    for app_id in app_ids {
+        // Значение из файла профилей попадает в имя записи хранилища: сначала проверка.
+        if let Err(err) = appgallery_connect_api::validate_app_id(app_id) {
+            problems.push(format!(
+                "app `{}` in {PROFILES_FILE}: {err}",
+                app_id.escape_debug()
+            ));
+            continue;
+        }
+        match store.get_app_secret(profile, app_id) {
+            Ok(app) => apps.push(app),
+            Err(
+                err
+                @ (StoreError::AppSecretNotFound { .. } | StoreError::AppSecretCorrupted { .. }),
+            ) => problems.push(err.to_string()),
+            Err(err) => {
+                return Err(anyhow::Error::new(err).context(format!(
+                    "cannot load the app secret of app `{}`",
+                    app_id.escape_debug()
+                )));
+            }
+        }
+    }
+    Ok((apps, problems))
+}
+
+/// API-клиенты проектов профиля из хранилища. Нет записи или запись испорчена — проект
+/// пропускается с текстом проблемы (запуск сервера из-за одного проекта не ломается);
+/// недоступное хранилище — ошибка.
+pub fn load_projects(
+    store: &dyn CredentialStore,
+    profile: &str,
+    project_ids: &[String],
+) -> anyhow::Result<(Vec<ProjectCredentials>, Vec<String>)> {
+    let mut projects = Vec::new();
+    let mut problems = Vec::new();
+    for project_id in project_ids {
+        match store.get_project(profile, project_id) {
+            Ok(credentials) => match ProjectCredentials::new(project_id.clone(), credentials) {
+                Ok(project) => projects.push(project),
+                Err(err) => problems.push(format!(
+                    "project `{}` in {PROFILES_FILE}: {err}",
+                    project_id.escape_debug()
+                )),
+            },
+            Err(
+                err @ (StoreError::ProjectNotFound { .. } | StoreError::ProjectCorrupted { .. }),
+            ) => {
+                problems.push(err.to_string());
+            }
+            Err(err) => {
+                return Err(anyhow::Error::new(err).context(format!(
+                    "cannot load the project-level API client of project `{project_id}`"
+                )));
+            }
+        }
+    }
+    Ok((projects, problems))
 }
 
 #[cfg(test)]
@@ -326,6 +544,8 @@ mod tests {
 
     fn sample() -> ProfileSettings {
         ProfileSettings {
+            kind: ProfileKind::ApiClient,
+            team_id: None,
             region: Region::Ru,
             apps: vec!["100000001".into()],
             packages: vec!["com.example.app".into()],
@@ -334,6 +554,8 @@ mod tests {
             allow_destructive: false,
             toolsets: vec!["apps".into(), "releases".into()],
             dynamic_toolsets: true,
+            projects: vec!["100".into()],
+            app_secrets: vec!["100000001".into()],
         }
     }
 
@@ -439,7 +661,10 @@ mod tests {
         let profile = load_profile_with(&repo, &store, "work").unwrap();
         assert_eq!(profile.name, "work");
         assert_eq!(profile.settings, sample());
-        assert_eq!(profile.credentials, credentials("1"));
+        assert!(
+            matches!(&profile.auth, ProfileAuth::ApiClient(c) if *c == credentials("1")),
+            "{profile:?}"
+        );
         let config = profile.client_config();
         assert_eq!(config.region, Region::Ru);
         assert!(config.base_url.is_none());
@@ -447,9 +672,81 @@ mod tests {
         assert!(!format!("{client:?}").contains(credentials("1").client_secret().expose()));
         assert!(load_profile_with(&repo, &store, "bad name").is_err());
 
+        // Клиент проекта из списка профиля попадает в настройки клиента API; проект без
+        // записи — проблема, а не ошибка.
+        assert!(profile.projects.is_empty());
+        assert_eq!(profile.project_problems.len(), 1);
+        assert!(
+            profile.project_problems[0]
+                .contains("auth project add --profile work --project-id 100"),
+            "{:?}",
+            profile.project_problems
+        );
+        store.set_project("work", "100", &credentials("3")).unwrap();
+        let profile = load_profile_with(&repo, &store, "work").unwrap();
+        assert!(profile.project_problems.is_empty());
+        let config = profile.client_config();
+        assert_eq!(config.projects.len(), 1);
+        assert_eq!(config.projects[0].project_id(), "100");
+        assert_eq!(config.projects[0].credentials(), &credentials("3"));
+        assert_eq!(config.profile.as_deref(), Some("work"));
+
         // Без файла профилей — регион по умолчанию.
         store.set(DEFAULT_PROFILE, &credentials("2")).unwrap();
         let profile = load_profile_with(&repo, &store, DEFAULT_PROFILE).unwrap();
         assert_eq!(profile.settings.region, Region::Cn);
+    }
+
+    #[test]
+    fn user_sign_in_profiles_need_a_team_and_the_oauth_record() {
+        let dir = tempfile::tempdir().unwrap();
+        let repo = ProfileRepo::in_dir(dir.path());
+        let store = MemoryStore::new();
+        let settings = ProfileSettings {
+            kind: ProfileKind::Oauth,
+            region: Region::Ru,
+            ..ProfileSettings::default()
+        };
+        repo.upsert("guest", settings.clone()).unwrap();
+        // API-клиент того же имени не подходит профилю со входом пользователя.
+        store.set("guest", &credentials("4")).unwrap();
+        let err = load_profile_with(&repo, &store, "guest").unwrap_err();
+        assert!(err.to_string().contains("has no team"), "{err}");
+        repo.upsert(
+            "guest",
+            ProfileSettings {
+                team_id: Some("7700".into()),
+                ..settings
+            },
+        )
+        .unwrap();
+        let text = fs::read_to_string(repo.path()).unwrap();
+        assert!(text.contains("type = \"oauth\""), "{text}");
+        assert!(text.contains("team_id = \"7700\""), "{text}");
+        let err = load_profile_with(&repo, &store, "guest").unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("auth login --oauth --profile guest"),
+            "{err}"
+        );
+        store
+            .set_oauth("guest", &crate::testing::sign_in("4"))
+            .unwrap();
+        let profile = load_profile_with(&repo, &store, "guest").unwrap();
+        let ProfileAuth::User { team_id, .. } = &profile.auth else {
+            panic!("{profile:?}");
+        };
+        assert_eq!(team_id, "7700");
+        let config = profile.client_config();
+        assert!(config.credentials.is_none());
+        let session = config.oauth.as_ref().unwrap();
+        assert_eq!(session.team_id.as_deref(), Some("7700"));
+        profile.api_client().unwrap();
+        // API-клиентский профиль в файле — без поля `type`.
+        repo.upsert("plain", ProfileSettings::default()).unwrap();
+        let text = fs::read_to_string(repo.path()).unwrap();
+        assert_eq!(text.matches("type =").count(), 1, "{text}");
+        fs::write(repo.path(), "[profiles.x]\ntype = \"service-account\"\n").unwrap();
+        assert!(repo.get("x").is_err());
     }
 }

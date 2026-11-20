@@ -68,6 +68,7 @@ pub const CREDENTIAL_KEYS: &[&str] = &[
     "api_key",
     "apikey",
     "auth_code",
+    "authorization_code",
     "credentials",
     "authorization",
     "cookie",

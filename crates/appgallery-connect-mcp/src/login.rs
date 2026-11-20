@@ -12,8 +12,10 @@ use std::io::Read;
 use std::path::Path;
 
 use anyhow::{Context, anyhow, bail};
+use appgallery_connect_api::project::MAX_CREDENTIAL_FILE_BYTES;
 use appgallery_connect_api::{
-    ApiClientCredentials, ClientId, ClientSecret, CredentialStore, KEYRING_SERVICE, StoreError,
+    ApiClientCredentials, ClientId, ClientSecret, CredentialFile, CredentialStore, KEYRING_SERVICE,
+    StoreError,
 };
 use zeroize::Zeroizing;
 
@@ -66,6 +68,108 @@ pub fn api_client_steps() -> String {
          the key in a file or a password manager; never paste it into a chat.\n\
          This server uses the API client mode (client ID and key), not a Service Account."
     )
+}
+
+/// Пошаговая подсказка, как создать API-клиент уровня проекта и скачать его файл. Пункты
+/// сверены со страницей Getting Started with the Server справочника AppGallery Connect
+/// (Downloading an Authentication Credential > Project-Level Credential).
+pub fn project_client_steps() -> String {
+    format!(
+        "To create a project-level API client in AppGallery Connect:\n  \
+         1. Sign in to AppGallery Connect at {AGC_CONSOLE_URL}, open Development and services \
+         and click the project card (the project needs a data processing location).\n  \
+         2. Go to Project settings > Server SDK and click Create under API client (or create \
+         it in Users and permissions > API key > Connect API with this project selected and \
+         the roles the services need).\n  \
+         3. Click Download credential: the file agc-apiclient-*.json holds the project ID, \
+         the client ID and the client secret. Pass it with --credential-file; it can be \
+         deleted afterwards. Never paste its contents into a chat."
+    )
+}
+
+/// Страница Getting Started справочника Connect API (режимы API-клиента и OAuth-клиента).
+pub const CONNECT_API_GETTING_STARTED_URL: &str = "https://developer.huawei.com/consumer/en/doc/AppGallery-connect-Guides/agcapi-getstarted-0000001111845114";
+
+/// Пошаговая подсказка, как получить OAuth-клиент для входа пользователя. Пункты сверены с
+/// разделом «OAuth Client Mode» страницы Getting Started справочника Connect API: режим для
+/// разработчиков платформ, области Connect API выдаются по заявке и проверке Huawei,
+/// вход — HUAWEI ID (Account Kit).
+pub fn oauth_client_steps() -> String {
+    format!(
+        "To sign in as a HUAWEI ID user you need an OAuth client: an app with HUAWEI ID \
+         (Account Kit) for which Huawei approved the Connect API scopes ({CONNECT_API_GETTING_STARTED_URL}, \
+         OAuth Client Mode):\n  \
+         1. In AppGallery Connect at {AGC_CONSOLE_URL} open My projects > the project > the app \
+         (or create a web app with HUAWEI ID in HUAWEI Developers Console > App services > \
+         HUAWEI ID) and enable HUAWEI ID (Account Kit).\n  \
+         2. Set the redirect URL (callback URL) of the app to a loopback address with a \
+         fixed port, such as http://127.0.0.1:8765/, and pass the same address with \
+         --redirect-uri (without it the command listens on a random port, which works only \
+         if HUAWEI ID accepts any loopback port).\n  \
+         3. Apply for the Connect API scopes (publish, report/read, product, develop, project) \
+         by email to agconnect@huawei.com as the Getting Started page describes; Huawei \
+         reviews the request.\n  \
+         4. Copy the client ID (OAuth 2.0 client ID, the App ID) and the client secret (App \
+         secret) from App information. Keep the secret in a file or a password manager; never \
+         paste it into a chat.\n\
+         The browser then opens the HUAWEI ID sign-in page; the account you sign in with must \
+         be a member of the team (Users and permissions) with the roles your tasks need."
+    )
+}
+
+/// Client ID OAuth-клиента: из флага, иначе вопросом в терминале (после подсказки
+/// [`oauth_client_steps`]).
+pub fn read_oauth_client_id(ui: &mut dyn Ui, flag: Option<&str>) -> anyhow::Result<ClientId> {
+    let value = match flag {
+        Some(value) => value.trim().to_owned(),
+        None => {
+            if !ui.is_interactive() {
+                bail!(
+                    "no terminal to ask for the client ID of the OAuth client: pass \
+                     --oauth-client-id <ID> (the OAuth 2.0 client ID of the app with HUAWEI ID)"
+                );
+            }
+            ui.say(&oauth_client_steps());
+            ui.ask("OAuth client ID: ")
+                .context("failed to read the client ID")?
+                .trim()
+                .to_owned()
+        }
+    };
+    ClientId::new(value).map_err(|err| anyhow!("invalid OAuth client ID: {err}"))
+}
+
+/// Client secret OAuth-клиента, если он есть: из файла или stdin (тогда обязателен) или
+/// скрытым вводом (пустой ответ — без секрета). Без терминала и без флагов — без секрета.
+pub fn read_optional_secret(
+    ui: &mut dyn Ui,
+    source: SecretSource<'_>,
+) -> anyhow::Result<Option<ClientSecret>> {
+    match source {
+        SecretSource::Prompt => {
+            if !ui.is_interactive() {
+                return Ok(None);
+            }
+            let text = ui
+                .ask_secret(
+                    "Client secret of the OAuth client (input is hidden; press Enter if it has \
+                     none): ",
+                )
+                .context("failed to read the client secret")?;
+            if text.trim().is_empty() {
+                return Ok(None);
+            }
+            ClientSecret::new(text.trim().to_owned())
+                .map(Some)
+                .map_err(|err| {
+                    anyhow!(
+                        "the hidden input does not contain a usable client secret: {err}; \
+                         nothing was stored"
+                    )
+                })
+        }
+        source => read_client_secret(ui, source).map(Some),
+    }
 }
 
 /// Значение аргумента, который принимается только затем, чтобы его отклонить: само
@@ -144,6 +248,49 @@ pub fn read_client_id(ui: &mut dyn Ui, flag: Option<&str>) -> anyhow::Result<Cli
         }
     };
     ClientId::new(value).map_err(|err| anyhow!("invalid API client ID: {err}"))
+}
+
+/// Идентификатор клиента проекта: из флага, иначе вопросом в терминале (после подсказки
+/// [`project_client_steps`]).
+pub fn read_project_client_id(ui: &mut dyn Ui, flag: Option<&str>) -> anyhow::Result<ClientId> {
+    let value = match flag {
+        Some(value) => value.trim().to_owned(),
+        None => {
+            if !ui.is_interactive() {
+                bail!(
+                    "no terminal to ask for the client ID of the project-level API client: pass \
+                     --credential-file <agc-apiclient-*.json> or --client-id <ID>"
+                );
+            }
+            ui.say(&project_client_steps());
+            ui.ask("Client ID: ")
+                .context("failed to read the client ID")?
+                .trim()
+                .to_owned()
+        }
+    };
+    ClientId::new(value).map_err(|err| anyhow!("invalid API client ID: {err}"))
+}
+
+/// Читает и разбирает файл `agc-apiclient-*.json`. Ни содержимое, ни значения в ошибки не
+/// попадают; путь нигде не запоминается.
+pub fn read_credential_file(path: &Path) -> anyhow::Result<CredentialFile> {
+    let display = path.display();
+    let file = fs::File::open(path)
+        .with_context(|| format!("cannot open the credential file `{display}`"))?;
+    let metadata = file
+        .metadata()
+        .with_context(|| format!("cannot read the credential file `{display}`"))?;
+    if !metadata.is_file() {
+        bail!("`{display}` is not a regular file");
+    }
+    let mut text = Zeroizing::new(String::new());
+    file.take(MAX_CREDENTIAL_FILE_BYTES as u64 + 1)
+        .read_to_string(&mut text)
+        .with_context(|| format!("cannot read the credential file `{display}` as UTF-8 text"))?;
+    CredentialFile::parse(&text).map_err(|err| {
+        anyhow!("the credential file `{display}` cannot be used: {err}; nothing was stored")
+    })
 }
 
 /// Читает секрет из потока (не больше [`MAX_SECRET_INPUT_BYTES`]). Содержимое в ошибки не

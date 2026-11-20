@@ -1,0 +1,80 @@
+---
+source: crates/appgallery-connect-api/tests/operations.rs
+expression: "snapshot_view(op(\"refund_subscription\"))"
+---
+{
+  "access": "destructive",
+  "auth_modes": [],
+  "body": "Json",
+  "description": "Only the most recent payment is refunded, and only once; the subscription stays valid and keeps renewing. In the sandbox and for products priced 0 the refund completes at once. Other payments are refunded only through Huawei support.\n\nDestructive: refunds the user's latest subscription payment; this cannot be undone.\n\nApp secret: this HMS In-App Purchases server API is not part of the AppGallery Connect API. The server signs the request with an app-level access token of the app given in `appId`, obtained with the stored app secret of that app, not with its API client. The user stores the app secret with `appgallery-connect-mcp auth app-secret set`. `api_request` cannot call this operation.",
+  "group": "subscriptions",
+  "input_schema": {
+    "additionalProperties": false,
+    "properties": {
+      "appId": {
+        "description": "App ID of the app whose app secret signs this request (My apps > the app > App information). It selects the stored app secret and is not sent to Huawei.",
+        "pattern": "^[0-9]{1,20}$",
+        "type": "string"
+      },
+      "body": {
+        "description": "Request body: `IapSubscriptionRequest` object. Purchase of a subscription.",
+        "properties": {
+          "purchaseToken": {
+            "description": "Purchase token from the purchase data (InAppPurchaseData) that the IAP client returns after a purchase or a purchase query.",
+            "type": "string"
+          },
+          "subscriptionId": {
+            "description": "Subscription ID (subscriptionId of the purchase data).",
+            "type": "string"
+          }
+        },
+        "required": [
+          "subscriptionId",
+          "purchaseToken"
+        ],
+        "type": "object"
+      }
+    },
+    "required": [
+      "appId",
+      "body"
+    ],
+    "type": "object"
+  },
+  "json_strings": [],
+  "method": "POST",
+  "omitted": [],
+  "operation_id": "subscriptions.purchase.returnFee",
+  "params": [
+    {
+      "api_name": "appId",
+      "description": "App ID of the app whose app secret signs this request (My apps > the app > App information). It selects the stored app secret and is not sent to Huawei.",
+      "location": "Credential",
+      "name": "appId",
+      "repeated": false,
+      "required": true,
+      "value_type": "String"
+    },
+    {
+      "api_name": "body",
+      "description": "Request body: `IapSubscriptionRequest` object. Purchase of a subscription.",
+      "location": "Body",
+      "name": "body",
+      "repeated": false,
+      "required": true,
+      "value_type": "Object"
+    }
+  ],
+  "path": "/sub/applications/v2/purchases/returnFee",
+  "reference": "https://developer.huawei.com/consumer/en/doc/development/HMSCore-References/api-refund-subscription-fee-0000001050986131",
+  "response": "Json",
+  "result": {
+    "code_field": "responseCode",
+    "field": "",
+    "message_field": "responseMessage"
+  },
+  "service": "iap-subscriptions",
+  "summary": "Refunds the latest payment of a subscription without canceling it.",
+  "tool_name": "refund_subscription",
+  "toolset": "purchases"
+}

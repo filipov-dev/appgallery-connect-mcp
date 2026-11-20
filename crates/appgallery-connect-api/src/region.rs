@@ -64,6 +64,18 @@ impl Region {
             Self::Ru => "Russia",
         }
     }
+
+    /// Регион по `siteId` команды из списка команд пользователя (Project Management API):
+    /// 1 — Китай, 5 — Сингапур, 7 — Германия, 8 — Россия.
+    pub fn from_site_id(site_id: i64) -> Option<Region> {
+        match site_id {
+            1 => Some(Self::Cn),
+            5 => Some(Self::Sg),
+            7 => Some(Self::De),
+            8 => Some(Self::Ru),
+            _ => None,
+        }
+    }
 }
 
 #[cfg(test)]
@@ -77,6 +89,15 @@ mod tests {
         }
         assert_eq!(Region::from_slug("RU"), Some(Region::Ru));
         assert_eq!(Region::from_slug("us"), None);
+    }
+
+    #[test]
+    fn site_ids() {
+        assert_eq!(Region::from_site_id(1), Some(Region::Cn));
+        assert_eq!(Region::from_site_id(5), Some(Region::Sg));
+        assert_eq!(Region::from_site_id(7), Some(Region::De));
+        assert_eq!(Region::from_site_id(8), Some(Region::Ru));
+        assert_eq!(Region::from_site_id(2), None);
     }
 
     #[test]

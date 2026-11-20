@@ -23,21 +23,34 @@ SPEC_DIR = Path(__file__).resolve().parent
 HTTP_METHODS = ("get", "post", "put", "patch", "delete")
 AUTH_HEADERS = {"client_id", "authorization", "teamid", "oauth2token"}
 ENVELOPES = {("ret", "code", "msg"), ("ret", "rtnCode", "rtnDesc"), ("error", "errorCode", "errorMsg")}
-TOOLSETS = ["apps", "releases", "listing", "reviews", "reports", "products", "projects", "provisioning"]
+TOOLSETS = ["apps", "releases", "listing", "reviews", "reports", "products", "projects", "provisioning", "remote-config", "app-linking", "purchases"]
 DEFAULT_TOOLSETS = {"apps", "releases", "reviews"}
 REFERENCE_PREFIXES = (
     "https://developer.huawei.com/consumer/en/doc/development/AppGallery-connect-References/",
     "https://developer.huawei.com/consumer/en/doc/app/",
+    "https://developer.huawei.com/consumer/en/doc/development/HMSCore-References/",
+    "https://developer.huawei.com/consumer/en/doc/harmonyos-references/",
 )
+# Сервисы HMS IAP (`x-agc-service`): свой хост, путь без `/api/`, корневой конверт
+# `responseCode` и подпись запроса секретом приложения.
+IAP_SERVICES = {"iap-orders", "iap-subscriptions", "iap-kit"}
+IAP_ENVELOPE = ("", "responseCode", "responseMessage")
+# REST API IAP Kit (HarmonyOS 5+): в снимке только для поиска, вызывать его сервер не
+# умеет (JWT ES256 и проверка JWS); ответ о возврате — со своим конвертом.
+IAP_KIT_SERVICE = "iap-kit"
+IAP_KIT_ENVELOPES = {IAP_ENVELOPE, ("", "returnCode", "returnDesc")}
 OVERLAY_KEYS = {
-    "": {"groups", "toolsets", "names", "access", "deprecated", "exclude", "secrets"},
+    "": {"groups", "toolsets", "names", "access", "deprecated", "exclude", "secrets", "project_credentials", "omit"},
     "groups": {"slug", "title", "reference"},
     "toolsets": {"slug", "description", "default", "operations"},
     "access": {"level", "reason", "operations"},
     "deprecated": {"operation", "replacement", "note"},
     "exclude": {"operations", "callable", "reason", "alternative"},
     "secrets": {"kind", "description", "hint", "operations", "fields"},
+    "project_credentials": {"groups", "operations", "param"},
+    "omit": {"reason", "operations", "fields"},
 }
+PROJECT_PARAMS = ("productId", "projectId")
 SECRET_KINDS = {"credential", "download-url", "file-content"}
 
 
@@ -74,7 +87,14 @@ class SpecTest(unittest.TestCase):
     def test_operations_are_described(self):
         count = 0
         for path, item in self.spec["paths"].items():
-            self.assertTrue(path.startswith("/api/"), path)
+            services = {operation.get("x-agc-service", "connect") for operation in item.values()}
+            self.assertEqual(len(services), 1, f"{path}: разные x-agc-service")
+            if services & IAP_SERVICES:
+                self.assertLessEqual(services, IAP_SERVICES, path)
+                self.assertTrue(path.startswith("/") and not path.startswith("/api/"), path)
+                self.assertNotIn("{", path)
+            else:
+                self.assertTrue(path.startswith("/api/"), path)
             self.assertNotIn("?", path)
             for method, operation in item.items():
                 self.assertIn(method, HTTP_METHODS, f"{path}: неизвестный ключ {method}")
@@ -135,9 +155,17 @@ class SpecTest(unittest.TestCase):
                 result = operation.get("x-agc-result")
                 self.assertIsNotNone(result, "у операции нет конверта результата")
                 self.assertEqual(set(result), {"field", "codeField", "messageField"})
-                self.assertIn((result["field"], result["codeField"], result["messageField"]), ENVELOPES)
+                envelope_key = (result["field"], result["codeField"], result["messageField"])
                 schema = operation["responses"]["200"]["content"]["application/json"]["schema"]
-                envelope = self.resolve(schema["properties"][result["field"]])
+                if operation.get("x-agc-service") == IAP_KIT_SERVICE:
+                    self.assertIn(envelope_key, IAP_KIT_ENVELOPES)
+                    envelope = self.resolve(schema)
+                elif operation.get("x-agc-service") in IAP_SERVICES:
+                    self.assertEqual(envelope_key, IAP_ENVELOPE)
+                    envelope = self.resolve(schema)
+                else:
+                    self.assertIn(envelope_key, ENVELOPES)
+                    envelope = self.resolve(schema["properties"][result["field"]])
                 self.assertIn(result["codeField"], envelope["properties"])
                 self.assertIn(result["messageField"], envelope["properties"])
 
@@ -193,9 +221,20 @@ class SpecTest(unittest.TestCase):
 
     def test_overlay_has_no_unknown_keys(self):
         self.assertLessEqual(set(self.overlay), OVERLAY_KEYS[""])
-        for section in ("groups", "toolsets", "access", "deprecated", "exclude", "secrets"):
+        for section in ("groups", "toolsets", "access", "deprecated", "exclude", "secrets", "project_credentials", "omit"):
             for entry in self.overlay.get(section, []):
                 self.assertLessEqual(set(entry), OVERLAY_KEYS[section], f"[[{section}]]")
+
+    def test_iap_kit_operations_are_not_callable(self):
+        iap_kit = [key for key, (_, _, operation) in self.operations.items()
+                   if operation.get("x-agc-service") == IAP_KIT_SERVICE]
+        self.assertEqual(len(iap_kit), 11)
+        for operation_id in iap_kit:
+            with self.subTest(operation=operation_id):
+                self.assertEqual(self.operations[operation_id][2]["x-agc-group"], "iapkit")
+                rule = self.excluded.get(operation_id)
+                self.assertIsNotNone(rule, "операция IAP Kit не исключена")
+                self.assertFalse(rule.get("callable", True))
 
     def test_groups(self):
         groups = [group["slug"] for group in self.overlay["groups"]]
@@ -262,10 +301,20 @@ class SpecTest(unittest.TestCase):
             "pms.promotion.create", "pms.promotion.update", "pms.promotion.batchActivate",
             "pms.promotion.batchDeactivate", "provisioning.cert.delete", "provisioning.device.delete",
             "provisioning.profile.delete", "publishing.languageInfo.delete",
+            "remoteconfig.config.update", "remoteconfig.config.rollback",
+            "orders.purchase.confirm", "subscriptions.purchase.stop", "subscriptions.purchase.delay",
+            "subscriptions.purchase.returnFee", "subscriptions.purchase.withdraw",
+            "iapkit.orderDelivery.confirm", "iapkit.subscriptionDelivery.confirm",
+            "iapkit.subscriptionRenewal.postpone", "iapkit.refundResult.send",
         }
         self.assertEqual({key for key, level in levels.items() if level == "destructive"}, destructive)
         for operation_id in ("pms.product.search", "pms.promotion.search", "pms.productGroup.list",
-                             "provisioning.cert.list", "comments.review.list"):
+                             "provisioning.cert.list", "comments.review.list", "orders.purchaseToken.verify",
+                             "orders.cancelledPurchase.list", "orders.merchantOrder.list",
+                             "subscriptions.purchase.get", "iapkit.orderStatus.query",
+                             "iapkit.tradeOrders.query", "iapkit.subscriptionStatus.query",
+                             "iapkit.order.lookup", "iapkit.userOrders.query",
+                             "iapkit.notifications.query"):
             self.assertEqual(levels[operation_id], "read", operation_id)
         for operation_id in ("publishing.appInfo.update", "publishing.languageInfo.update",
                              "publishing.fileInfo.update", "upload.uploadUrl.get"):
@@ -290,6 +339,12 @@ class SpecTest(unittest.TestCase):
         for operation_id in token + upload_steps + list(self.external):
             self.assertIn(operation_id, self.excluded)
             self.assertFalse(self.excluded[operation_id].get("callable", True), operation_id)
+        # Запрос сертификата принимает CSR строкой в теле: его вызывает только составной
+        # certificate_request, который читает CSR из файла.
+        rule = self.excluded.get("provisioning.cert.create")
+        self.assertIsNotNone(rule)
+        self.assertFalse(rule.get("callable", True))
+        self.assertIn("certificate_request", rule["alternative"])
 
     def test_deprecated_rules(self):
         for rule in self.overlay.get("deprecated", []):
@@ -319,6 +374,72 @@ class SpecTest(unittest.TestCase):
                                 self.assertEqual(node["type"], "array")
                                 node = self.resolve(node["items"])
                         self.assertEqual(node["type"], "string")
+
+    def test_json_strings_and_omitted_fields(self):
+        json_strings = {}
+        for operation_id, (_, _, operation) in self.operations.items():
+            root = operation["responses"]["200"]["content"]["application/json"]["schema"]
+            for name, field in self.resolve(root).get("properties", {}).items():
+                if "x-agc-json" in field:
+                    with self.subTest(operation=operation_id, field=name):
+                        self.assertEqual(field["type"], "string")
+                        self.assertIsInstance(field["x-agc-json"], dict)
+                        self.assertIn(operation.get("x-agc-service"), IAP_SERVICES)
+                        json_strings.setdefault(operation_id, set()).add(name)
+        self.assertEqual(
+            json_strings,
+            {
+                "orders.purchaseToken.verify": {"purchaseTokenData"},
+                "orders.cancelledPurchase.list": {"cancelledPurchaseList"},
+                "subscriptions.purchase.get": {"inappPurchaseData"},
+            },
+        )
+        seen = set()
+        for rule in self.overlay.get("omit", []):
+            self.assertTrue(rule["reason"].strip())
+            for operation_id in rule["operations"]:
+                self.assertIn(operation_id, self.operations, f"[[omit]]: нет операции {operation_id}")
+                self.assertNotIn(operation_id, self.excluded)
+                _, _, operation = self.operations[operation_id]
+                root = self.resolve(operation["responses"]["200"]["content"]["application/json"]["schema"])
+                for field in rule["fields"]:
+                    with self.subTest(operation=operation_id, field=field):
+                        self.assertNotIn((operation_id, field), seen)
+                        seen.add((operation_id, field))
+                        self.assertIn(field, root["properties"])
+                        self.assertNotIn(field, json_strings.get(operation_id, set()))
+
+    def test_project_credentials(self):
+        groups = {group["slug"] for group in self.overlay["groups"]}
+        seen = set()
+        for rule in self.overlay.get("project_credentials", []):
+            self.assertTrue(rule.get("groups") or rule.get("operations"))
+            targets = list(rule.get("operations", []))
+            for group in rule.get("groups", []):
+                self.assertIn(group, groups)
+                targets += [
+                    operation_id
+                    for operation_id, (_, _, operation) in self.operations.items()
+                    if operation["x-agc-group"] == group and operation_id not in self.excluded
+                ]
+            for operation_id in targets:
+                with self.subTest(operation=operation_id):
+                    self.assertIn(operation_id, self.operations)
+                    self.assertNotIn(operation_id, self.excluded)
+                    self.assertNotIn(operation_id, seen)
+                    seen.add(operation_id)
+                    _, _, operation = self.operations[operation_id]
+                    modes = operation.get("x-agc-auth-modes")
+                    if modes is not None:
+                        self.assertIn("api-client", modes)
+                    names = [rule["param"]] if "param" in rule else PROJECT_PARAMS
+                    params = [
+                        param
+                        for param in (self.resolve(p) for p in operation.get("parameters", []))
+                        if param["name"] in names
+                    ]
+                    self.assertEqual(len(params), 1, "нужен один параметр с идентификатором проекта")
+                    self.assertTrue(params[0].get("required") or params[0]["in"] == "path")
 
     # --------------------------------------------------------------- гигиена
 

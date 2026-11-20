@@ -1,0 +1,35 @@
+# Контекст Docker-сборки: нужны только Cargo.toml, Cargo.lock и crates/.
+target
+**/target
+# Скрытые каталоги и файлы корня (git, локальные настройки, CI) в образ не нужны.
+.*
+docs
+scripts
+*.md
+!crates/**/*.md
+.env
+.env.*
+.DS_Store
+*.log
+*.p12
+*.pfx
+*.p8
+*.cer
+*.crt
+*.pem
+*.key
+*.certSigningRequest
+*.csr
+*.mobileprovision
+*.provisionprofile
+*.keychain
+*.keychain-db
+AuthKey_*
+*.b64
+*.base64
+agc-apiclient*.json
+agconnect-services*.json
+client_secret*.json
+credentials*.json
+secrets
+tokens.toml

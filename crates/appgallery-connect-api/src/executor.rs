@@ -21,7 +21,34 @@
 //!   чтения; `POST` и `PATCH` не повторяются); `401` — один повтор с новым токеном для
 //!   любого метода; ошибка соединения до отправки запроса — повтор для любого метода;
 //! - токены, секрет и идентификатор клиента вырезаются из текстов ошибок и ответов
-//!   ([`ApiClient::scrub`], [`crate::scrub::scrub_secrets`]).
+//!   ([`ApiClient::scrub`], [`crate::scrub::scrub_secrets`]) — и клиента команды, и
+//!   клиентов проектов.
+//!
+//! Обычные запросы подписывает API-клиент команды ([`ClientConfig::credentials`]).
+//! Операции сервисов проекта ([`OperationDef::project_param`]) подписывает API-клиент
+//! проекта из [`ClientConfig::projects`]: проект берётся из аргумента операции
+//! ([`ApiRequest::project`], [`ApiRequest::select_project`]), у каждого проекта свой
+//! источник токенов на том же хосте региона. Нет клиента этого проекта —
+//! [`ApiError::MissingProjectCredentials`] без запроса; к клиенту команды такой запрос не
+//! откатывается.
+//!
+//! Вход пользователя (режим OAuth-клиента, [`ClientConfig::oauth`],
+//! [`crate::user_oauth`]) вместо API-клиента команды: запрос несёт `oauth2Token` (access
+//! token пользователя, без `Bearer`) и `teamId` (команда профиля), без `client_id` и
+//! `Authorization`. Оба заголовка задаёт только исполнитель. Операция, для которой
+//! справочник не называет этот режим ([`OperationDef::auth_modes`],
+//! [`ApiRequest::auth_modes`]), отклоняется до запроса: [`ApiError::UnsupportedAuthMode`].
+//! Операции проектов и в этом режиме подписывает API-клиент проекта.
+//!
+//! Операции HMS IAP ([`OperationDef::service`], [`ApiService`]) идут на хост своего
+//! сервиса в регионе профиля (`orders-*`, `subscr-*`; путь проверяет
+//! [`crate::path::validate_service_path`]) и подписываются токеном приложения
+//! ([`crate::app`]): заголовок `Authorization: Basic base64("APPAT:" + token)`, без
+//! `client_id`. Приложение берётся из аргумента `appId` операции ([`ApiRequest::app`]),
+//! секрет — из [`ClientConfig::apps`]; нет секрета этого приложения —
+//! [`ApiError::MissingAppCredentials`] без запроса. Произвольные запросы
+//! ([`ApiRequest::new`]) идут только в AppGallery Connect API: `api_request` не становится
+//! клиентом IAP.
 //!
 //! Запросы на адреса, которые выдаёт сам API (загрузка файлов, ссылки на отчёты), сюда не
 //! входят: у них нет заголовков авторизации Connect API, а адрес — секрет. Для них —
@@ -38,20 +65,24 @@ use reqwest::header::{self, HeaderMap, HeaderName, HeaderValue};
 use reqwest::{Method, StatusCode, redirect};
 use serde_json::{Map, Value};
 
+use crate::app::{AppCredentials, AppTokens, app_authorization};
 use crate::credentials::ApiClientCredentials;
-use crate::envelope::{ResultStatus, detect_result, result_of};
+use crate::envelope::{ResultStatus, detect_result, read_result, result_of};
 use crate::http::{
     api_base, content_type, describe_client_error, describe_reqwest_error, lossy_prefix,
     read_limited, truncate,
 };
-use crate::path::shorten;
+use crate::path::{shorten, validate_service_path};
+use crate::project::{ProjectCredentials, validate_project_id};
 use crate::region::Region;
 use crate::scrub::{MASK, scrub_secrets};
-use crate::spec::{AccessLevel, OperationDef, ParamLocation, ResultDef};
+use crate::service::ApiService;
+use crate::spec::{AccessLevel, AuthMode, OperationDef, ParamLocation, ResultDef};
 use crate::token::{AccessToken, ApiClientTokens, TokenError, TokenSource};
 use crate::transfer::{
     DownloadedFile, TransferClient, TransferConfig, UploadRequest, UploadResponse,
 };
+use crate::user_oauth::{OAuthSession, UserTokens};
 
 pub use crate::http::{CONNECT_TIMEOUT, USER_AGENT};
 pub use crate::path::{render_path, validate_api_path};
@@ -73,14 +104,21 @@ pub const ERROR_TEXT_LIMIT: usize = 2000;
 /// Имя заголовка с идентификатором API-клиента.
 pub const CLIENT_ID_HEADER: &str = "client_id";
 
+/// Заголовок с access token пользователя (режим OAuth-клиента).
+pub const OAUTH_TOKEN_HEADER: &str = "oauth2Token";
+
+/// Заголовок с командой пользователя (режим OAuth-клиента).
+pub const TEAM_ID_HEADER: &str = "teamId";
+
 /// Заголовки (в нижнем регистре), которые запрос задать не может: авторизацию и
 /// идентификатор клиента добавляет исполнитель, остальные — служебные и hop-by-hop
 /// заголовки HTTP. Кроме них отклоняются имена с префиксами `proxy-` и `sec-`.
 pub const FORBIDDEN_REQUEST_HEADERS: &[&str] = &[
     "authorization",
     CLIENT_ID_HEADER,
-    // Токен режима OAuth-клиента: токены в аргументах не передаются.
+    // Режим OAuth-клиента: токен и команду задаёт только исполнитель.
     "oauth2token",
+    "teamid",
     "host",
     "content-type",
     "content-length",
@@ -183,6 +221,17 @@ pub struct ClientConfig {
     pub retry: RetryPolicy,
     /// Передача файлов на адреса из ответов API (загрузка, отчёты).
     pub transfer: TransferConfig,
+    /// API-клиенты уровня проекта профиля: ими подписываются операции сервисов проекта
+    /// ([`OperationDef::project_param`]). Один клиент на проект.
+    pub projects: Vec<ProjectCredentials>,
+    /// Имя профиля — только для подсказок в ошибках (`auth project add --profile …`).
+    pub profile: Option<String>,
+    /// Вход пользователя (режим OAuth-клиента) вместо API-клиента команды. Вместе с
+    /// [`Self::credentials`] не задаётся.
+    pub oauth: Option<OAuthSession>,
+    /// Секреты приложений профиля: ими подписываются операции HMS IAP
+    /// ([`OperationDef::service`]). Один секрет на приложение.
+    pub apps: Vec<AppCredentials>,
 }
 
 impl ClientConfig {
@@ -197,6 +246,18 @@ impl ClientConfig {
             max_response_bytes: DEFAULT_MAX_RESPONSE_BYTES,
             retry: RetryPolicy::default(),
             transfer: TransferConfig::default(),
+            projects: Vec::new(),
+            profile: None,
+            apps: Vec::new(),
+            oauth: None,
+        }
+    }
+
+    /// Настройки по умолчанию для региона и входа пользователя.
+    pub fn with_oauth(region: Region, session: OAuthSession) -> Self {
+        Self {
+            oauth: Some(session),
+            ..Self::new(region, None)
         }
     }
 }
@@ -234,6 +295,18 @@ pub struct ApiRequest {
     pub result: ResultCheck,
     /// Имя операции (инструмента) для текстов ошибок.
     pub operation: Option<String>,
+    /// Идентификатор проекта, чей API-клиент подписывает запрос; `None` — клиент команды.
+    /// У операций с [`OperationDef::project_param`] его задаёт [`Self::select_project`].
+    pub project: Option<String>,
+    /// Режимы авторизации операции ([`OperationDef::auth_modes`]); пусто — любой. Задаёт
+    /// [`Self::select_project`].
+    pub auth_modes: &'static [AuthMode],
+    /// Сервис, на хост которого уходит запрос. [`Self::new`] — всегда AppGallery Connect
+    /// API; сервис IAP задаёт только [`Self::for_operation`].
+    pub service: ApiService,
+    /// Приложение, чей секрет подписывает запрос IAP (аргумент
+    /// [`ParamLocation::Credential`]); у запросов AppGallery Connect API — `None`.
+    pub app: Option<String>,
 }
 
 impl ApiRequest {
@@ -248,6 +321,10 @@ impl ApiRequest {
             idempotent: method.is_idempotent(),
             result: ResultCheck::Detect,
             operation: None,
+            project: None,
+            auth_modes: &[],
+            service: ApiService::Connect,
+            app: None,
         }
     }
 
@@ -302,14 +379,21 @@ impl ApiRequest {
                 )));
             }
         }
-        let path = render_path(op.path, |name| {
-            op.params_in(ParamLocation::Path)
-                .find(|param| param.api_name == name || param.name == name)
-                .and_then(|param| present(param.name))
-                .and_then(scalar_text)
-        })?;
+        let path = if op.service.is_iap() {
+            // Пути IAP без параметров: генератор не допускает в них `{…}`.
+            validate_service_path(op.path)?;
+            op.path.to_owned()
+        } else {
+            render_path(op.path, |name| {
+                op.params_in(ParamLocation::Path)
+                    .find(|param| param.api_name == name || param.name == name)
+                    .and_then(|param| present(param.name))
+                    .and_then(scalar_text)
+            })?
+        };
 
         let mut request = Self::new(op.method, path);
+        request.service = op.service;
         request.idempotent = op.method.is_idempotent() || op.access == AccessLevel::Read;
         request.result = match op.result {
             Some(def) => ResultCheck::Envelope(def),
@@ -356,7 +440,109 @@ impl ApiRequest {
         }
         // Заголовки проверяются сразу: ошибка в описании операции видна до запроса.
         request_headers(&request.headers)?;
+        request.select_project(op)?;
+        request.select_app(op, present)?;
         Ok(request)
+    }
+
+    /// Выбирает секрет приложения для операции HMS IAP: значение аргумента
+    /// [`ParamLocation::Credential`] (`appId`). У операции AppGallery Connect API ничего не
+    /// меняет; у операции IAP без такого параметра — [`ApiError::InvalidRequest`].
+    fn select_app<'a>(
+        &mut self,
+        op: &OperationDef,
+        present: impl Fn(&str) -> Option<&'a Value>,
+    ) -> Result<(), ApiError> {
+        if !op.service.is_iap() {
+            return Ok(());
+        }
+        let Some(param) = op.app_param() else {
+            return Err(ApiError::InvalidRequest(format!(
+                "`{}` is signed with an app secret, but its app parameter is not described",
+                op.tool_name
+            )));
+        };
+        let app_id = present(param.name)
+            .and_then(scalar_text)
+            .map(|value| value.trim().to_owned())
+            .ok_or_else(|| {
+                ApiError::InvalidRequest(format!(
+                    "`{}` is signed with the app secret of an app: pass the app ID in `{}`",
+                    op.tool_name, param.name
+                ))
+            })?;
+        crate::app::validate_app_id(&app_id).map_err(|err| {
+            ApiError::InvalidRequest(format!(
+                "invalid `{}` of `{}`: {err}",
+                param.name, op.tool_name
+            ))
+        })?;
+        self.app = Some(app_id);
+        Ok(())
+    }
+
+    /// Выбирает API-клиент проекта для операции с [`OperationDef::project_param`]: значение
+    /// параметра берётся из уже собранного запроса (сегмент пути по шаблону операции,
+    /// параметр query или заголовок; имена query и заголовков — без учёта регистра).
+    /// Так выбирают клиента и инструменты операций, и `api_request` к пути такой операции.
+    /// Нет значения или значения расходятся — [`ApiError::InvalidRequest`]. Заодно
+    /// переносит в запрос режимы авторизации операции ([`Self::auth_modes`]).
+    pub fn select_project(&mut self, op: &OperationDef) -> Result<(), ApiError> {
+        self.auth_modes = op.auth_modes;
+        let Some(name) = op.project_param else {
+            return Ok(());
+        };
+        let Some(param) = op.param(name) else {
+            return Err(ApiError::InvalidRequest(format!(
+                "`{}` needs a project-level API client, but its project parameter `{name}` is \
+                 not described",
+                op.tool_name
+            )));
+        };
+        let mut values: Vec<String> = match param.location {
+            ParamLocation::Path => path_value(op.path, &self.path, param.api_name)
+                .into_iter()
+                .collect(),
+            ParamLocation::Query => self
+                .query
+                .iter()
+                .filter(|(key, _)| key.eq_ignore_ascii_case(param.api_name))
+                .map(|(_, value)| value.clone())
+                .collect(),
+            ParamLocation::Header => self
+                .headers
+                .iter()
+                .filter(|(key, _)| key.trim().eq_ignore_ascii_case(param.api_name))
+                .map(|(_, value)| value.clone())
+                .collect(),
+            ParamLocation::Body | ParamLocation::Credential => Vec::new(),
+        };
+        values
+            .iter_mut()
+            .for_each(|value| *value = value.trim().to_owned());
+        values.sort();
+        values.dedup();
+        let project = match values.as_slice() {
+            [value] => value.clone(),
+            [] => {
+                return Err(ApiError::InvalidRequest(format!(
+                    "`{}` is signed with the API client of a project: pass the project ID in \
+                     `{name}`",
+                    op.tool_name
+                )));
+            }
+            _ => {
+                return Err(ApiError::InvalidRequest(format!(
+                    "`{name}` is given more than once with different values: the request is \
+                     signed with the API client of one project"
+                )));
+            }
+        };
+        validate_project_id(&project).map_err(|err| {
+            ApiError::InvalidRequest(format!("invalid `{name}` of `{}`: {err}", op.tool_name))
+        })?;
+        self.project = Some(project);
+        Ok(())
     }
 
     /// Добавляет параметр query (повторный вызов с тем же именем — повтор параметра).
@@ -403,6 +589,30 @@ impl ApiRequest {
         self.operation = Some(operation.into());
         self
     }
+}
+
+/// Значение параметра пути `name` в пути `path` по шаблону `template` (сегмент
+/// целиком `{name}`), после percent-декодирования. Число сегментов должно совпадать.
+fn path_value(template: &str, path: &str, name: &str) -> Option<String> {
+    let parts = |text: &str| -> Vec<String> {
+        let trimmed = text.trim_start_matches('/');
+        let trimmed = trimmed.strip_suffix('/').unwrap_or(trimmed);
+        trimmed.split('/').map(str::to_owned).collect()
+    };
+    let (template, path) = (parts(template), parts(path));
+    if template.len() != path.len() {
+        return None;
+    }
+    let placeholder = format!("{{{name}}}");
+    template
+        .iter()
+        .zip(&path)
+        .find(|(segment, _)| **segment == placeholder)
+        .map(|(_, value)| {
+            percent_encoding::percent_decode_str(value)
+                .decode_utf8_lossy()
+                .into_owned()
+        })
 }
 
 /// Текст скалярного значения аргумента: строка как есть, число и логическое — текстом.
@@ -521,11 +731,13 @@ pub struct HttpError {
     pub retry_after: Option<u64>,
     /// Имя операции (инструмента), если запрос — операция из таблицы.
     pub operation: Option<String>,
+    /// Сервис, который ответил (AppGallery Connect API или HMS IAP).
+    pub service: ApiService,
 }
 
 impl fmt::Display for HttpError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "AppGallery Connect API returned HTTP {}", self.status)?;
+        write!(f, "{} returned HTTP {}", self.service.title(), self.status)?;
         if let Some(reason) = StatusCode::from_u16(self.status)
             .ok()
             .and_then(|s| s.canonical_reason())
@@ -562,11 +774,13 @@ pub struct ResultError {
     pub operation: Option<String>,
     /// Конверт, в котором пришёл код.
     pub envelope: ResultDef,
+    /// Сервис, который ответил (AppGallery Connect API или HMS IAP).
+    pub service: ApiService,
 }
 
 impl fmt::Display for ResultError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "AppGallery Connect API returned an error")?;
+        write!(f, "{} returned an error", self.service.title())?;
         if let Some(operation) = &self.operation {
             write!(f, " for `{operation}`")?;
         }
@@ -574,11 +788,15 @@ impl fmt::Display for ResultError {
         if let Some(message) = &self.message {
             write!(f, ": {message}")?;
         }
-        write!(
-            f,
-            " (HTTP {}, {}.{})",
-            self.status, self.envelope.field, self.envelope.code_field
-        )
+        if self.envelope.field.is_empty() {
+            write!(f, " (HTTP {}, {})", self.status, self.envelope.code_field)
+        } else {
+            write!(
+                f,
+                " (HTTP {}, {}.{})",
+                self.status, self.envelope.field, self.envelope.code_field
+            )
+        }
     }
 }
 
@@ -600,6 +818,28 @@ pub enum ApiError {
     /// отправлялся.
     #[error("no AppGallery Connect API client credentials are configured for this request")]
     MissingCredentials,
+    /// Операции нужен API-клиент проекта, а клиента этого проекта у профиля нет; запрос не
+    /// отправлялся.
+    #[error("{}", describe_missing_project(.project_id, .profile.as_deref()))]
+    MissingProjectCredentials {
+        project_id: String,
+        profile: Option<String>,
+    },
+    /// Операцию нельзя вызвать от имени пользователя (режим OAuth-клиента): справочник
+    /// описывает её только для других режимов. Запрос не отправлялся.
+    #[error(
+        "`{operation}` is not available when the server works as a signed-in user (OAuth \
+         client): the Huawei reference describes it only for {modes}. Use a profile with an API \
+         client for it (`appgallery-connect-mcp auth login --profile <name>`)"
+    )]
+    UnsupportedAuthMode { operation: String, modes: String },
+    /// Операции HMS IAP нужен секрет приложения, а секрета этого приложения у профиля нет;
+    /// запрос не отправлялся.
+    #[error("{}", describe_missing_app(.app_id, .profile.as_deref()))]
+    MissingAppCredentials {
+        app_id: String,
+        profile: Option<String>,
+    },
     /// Не удалось получить access token; запрос не отправлялся.
     #[error("{0}")]
     Token(#[from] TokenError),
@@ -629,6 +869,31 @@ pub enum ApiError {
     Io(String),
 }
 
+fn describe_missing_project(project_id: &str, profile: Option<&str>) -> String {
+    let profile = profile.unwrap_or("<profile>");
+    format!(
+        "this request is signed with a project-level API client, and no API client of project \
+         `{project_id}` is stored for this server: the team-level API client or user sign-in of \
+         the server is not accepted by the services of a project. Add one with `appgallery-connect-mcp auth \
+         project add --profile {profile} --project-id {project_id}` (create the API client in \
+         AppGallery Connect > the project > Project settings > Server SDK, or in Users and \
+         permissions > API key > Connect API with this project selected) and restart the \
+         server"
+    )
+}
+
+fn describe_missing_app(app_id: &str, profile: Option<&str>) -> String {
+    let profile = profile.unwrap_or("<profile>");
+    format!(
+        "this request is signed with an app-level access token, and no app secret of app \
+         `{app_id}` is stored for this server: HMS In-App Purchases server APIs do not accept \
+         the API client of the server. Store the client ID and client secret of the app with \
+         `appgallery-connect-mcp auth app-secret set --profile {profile} --app {app_id}` (they \
+         are in AppGallery Connect > My apps > the app > App information, or All services > \
+         In-App Purchases) and restart the server"
+    )
+}
+
 impl ApiError {
     /// HTTP-статус ответа API, если ошибка пришла от API.
     pub fn status(&self) -> Option<u16> {
@@ -644,7 +909,9 @@ impl ApiError {
         match self {
             Self::Http(e) => e.code.as_deref(),
             Self::Result(e) => Some(&e.code),
-            Self::Token(TokenError::Rejected { code, .. }) => code.as_deref(),
+            Self::Token(
+                TokenError::Rejected { code, .. } | TokenError::AppRejected { code, .. },
+            ) => code.as_deref(),
             _ => None,
         }
     }
@@ -658,11 +925,88 @@ impl ApiError {
     }
 }
 
-/// Авторизация запросов: идентификатор клиента и источник токенов.
+/// Способ авторизации: API-клиент (`client_id` и `Authorization`) или пользователь
+/// (`oauth2Token` и `teamId`).
+#[derive(Clone)]
+enum AuthKind {
+    ApiClient { client_id: HeaderValue },
+    User { team_id: Option<HeaderValue> },
+}
+
+/// Авторизация запросов: способ и источник токенов.
 #[derive(Clone)]
 struct Auth {
-    client_id: HeaderValue,
+    kind: AuthKind,
     tokens: Arc<dyn TokenSource>,
+}
+
+impl Auth {
+    fn new(
+        credentials: &ApiClientCredentials,
+        tokens: Arc<dyn TokenSource>,
+    ) -> Result<Self, ApiError> {
+        let mut client_id =
+            HeaderValue::from_str(credentials.client_id().expose()).map_err(|_| {
+                ApiError::InvalidConfig("the client ID cannot be sent in an HTTP header".into())
+            })?;
+        client_id.set_sensitive(true);
+        Ok(Self {
+            kind: AuthKind::ApiClient { client_id },
+            tokens,
+        })
+    }
+
+    fn user(session: &OAuthSession, tokens: Arc<dyn TokenSource>) -> Result<Self, ApiError> {
+        let team_id = match &session.team_id {
+            Some(team) => {
+                crate::user_oauth::validate_team_id(team)
+                    .map_err(|err| ApiError::InvalidConfig(err.to_string()))?;
+                Some(HeaderValue::from_str(team).map_err(|_| {
+                    ApiError::InvalidConfig("the team ID cannot be sent in an HTTP header".into())
+                })?)
+            }
+            None => None,
+        };
+        Ok(Self {
+            kind: AuthKind::User { team_id },
+            tokens,
+        })
+    }
+
+    /// Заголовки авторизации запроса с токеном `token`.
+    fn apply(
+        &self,
+        builder: reqwest::RequestBuilder,
+        token: &AccessToken,
+    ) -> Result<reqwest::RequestBuilder, ApiError> {
+        Ok(match &self.kind {
+            AuthKind::ApiClient { client_id } => builder
+                .header(CLIENT_ID_HEADER, client_id.clone())
+                .header(header::AUTHORIZATION, authorization(token)?),
+            AuthKind::User { team_id } => {
+                let builder = builder.header(OAUTH_TOKEN_HEADER, raw_token(token)?);
+                match team_id {
+                    Some(team) => builder.header(TEAM_ID_HEADER, team.clone()),
+                    None => builder,
+                }
+            }
+        })
+    }
+}
+
+/// Чем подписывается запрос: API-клиентом (команды или проекта) или токеном приложения.
+enum Signer<'a> {
+    Connect(&'a Auth),
+    App(&'a Arc<dyn TokenSource>),
+}
+
+impl Signer<'_> {
+    fn tokens(&self) -> &Arc<dyn TokenSource> {
+        match self {
+            Self::Connect(auth) => &auth.tokens,
+            Self::App(tokens) => tokens,
+        }
+    }
 }
 
 /// Клиент AppGallery Connect API.
@@ -672,6 +1016,10 @@ pub struct ApiClient {
     base: url::Url,
     http: reqwest::Client,
     auth: Option<Auth>,
+    /// Авторизация API-клиентов проектов по идентификатору проекта.
+    projects: BTreeMap<String, Auth>,
+    /// Источники токенов приложений по App ID (операции HMS IAP).
+    apps: BTreeMap<String, Arc<dyn TokenSource>>,
     transfer: TransferClient,
 }
 
@@ -684,22 +1032,25 @@ impl fmt::Debug for ApiClient {
 }
 
 impl ApiClient {
-    /// Клиент с токенами API-клиента из [`ClientConfig::credentials`].
+    /// Клиент с токенами API-клиента из [`ClientConfig::credentials`] или входа
+    /// пользователя из [`ClientConfig::oauth`].
     pub fn new(config: ClientConfig) -> Result<Self, ApiError> {
-        let tokens: Option<Arc<dyn TokenSource>> = match &config.credentials {
-            Some(credentials) => Some(Arc::new(ApiClientTokens::with_base_url(
+        let tokens: Option<Arc<dyn TokenSource>> = match (&config.credentials, &config.oauth) {
+            (Some(credentials), None) => Some(Arc::new(ApiClientTokens::with_base_url(
                 config.region,
                 config.base_url.as_deref(),
                 credentials.clone(),
             )?)),
-            None => None,
+            (None, Some(session)) => Some(Arc::new(UserTokens::new(session)?)),
+            _ => None,
         };
         Self::build(config, tokens)
     }
 
     /// Клиент с заданным источником токенов (тесты: [`crate::token::StaticToken`] или
-    /// [`ApiClientTokens`] с управляемыми часами). Идентификатор клиента для заголовка
-    /// `client_id` берётся из [`ClientConfig::credentials`].
+    /// [`ApiClientTokens`] с управляемыми часами). Способ авторизации и идентификатор
+    /// клиента для заголовка `client_id` берутся из [`ClientConfig::credentials`] или
+    /// [`ClientConfig::oauth`].
     pub fn with_token_source(
         config: ClientConfig,
         tokens: Arc<dyn TokenSource>,
@@ -710,19 +1061,51 @@ impl ApiClient {
     fn build(config: ClientConfig, tokens: Option<Arc<dyn TokenSource>>) -> Result<Self, ApiError> {
         let base =
             api_base(config.region, config.base_url.as_deref()).map_err(ApiError::InvalidConfig)?;
-        let auth = match (&config.credentials, tokens) {
-            (Some(credentials), Some(tokens)) => {
-                let mut client_id = HeaderValue::from_str(credentials.client_id().expose())
-                    .map_err(|_| {
-                        ApiError::InvalidConfig(
-                            "the client ID cannot be sent in an HTTP header".into(),
-                        )
-                    })?;
-                client_id.set_sensitive(true);
-                Some(Auth { client_id, tokens })
+        let auth = match (&config.credentials, &config.oauth, tokens) {
+            (Some(_), Some(_), _) => {
+                return Err(ApiError::InvalidConfig(
+                    "both an API client and a user sign-in are configured".into(),
+                ));
             }
+            (Some(credentials), None, Some(tokens)) => Some(Auth::new(credentials, tokens)?),
+            (None, Some(session), Some(tokens)) => Some(Auth::user(session, tokens)?),
             _ => None,
         };
+        // У каждого проекта свой источник токенов на том же хосте региона: токен получается
+        // при первом запросе к операции этого проекта.
+        let mut projects = BTreeMap::new();
+        for project in &config.projects {
+            let tokens: Arc<dyn TokenSource> = Arc::new(ApiClientTokens::with_base_url(
+                config.region,
+                config.base_url.as_deref(),
+                project.credentials().clone(),
+            )?);
+            let auth = Auth::new(project.credentials(), tokens)?;
+            if projects
+                .insert(project.project_id().to_owned(), auth)
+                .is_some()
+            {
+                return Err(ApiError::InvalidConfig(format!(
+                    "project `{}` has two API clients",
+                    project.project_id()
+                )));
+            }
+        }
+        // У каждого приложения свой источник токенов Huawei OAuth: токен получается при
+        // первом запросе IAP этого приложения.
+        let mut apps: BTreeMap<String, Arc<dyn TokenSource>> = BTreeMap::new();
+        for app in &config.apps {
+            let tokens: Arc<dyn TokenSource> = Arc::new(AppTokens::with_base_url(
+                config.base_url.as_deref(),
+                app.clone(),
+            )?);
+            if apps.insert(app.app_id().to_owned(), tokens).is_some() {
+                return Err(ApiError::InvalidConfig(format!(
+                    "app `{}` has two app secrets",
+                    app.app_id()
+                )));
+            }
+        }
         // Редиректы не выполняются: токен и тело запроса не должны уйти на другой адрес, а
         // клиент — стать прокси. Ответ 3xx возвращается как `ApiError::Http`.
         let http = reqwest::Client::builder()
@@ -738,8 +1121,34 @@ impl ApiClient {
             base,
             http,
             auth,
+            projects,
+            apps,
             transfer,
         })
+    }
+
+    /// Приложения, для которых у клиента есть секрет приложения, по порядку.
+    pub fn app_ids(&self) -> Vec<&str> {
+        self.apps.keys().map(String::as_str).collect()
+    }
+
+    /// Проверяет секрет приложения: получает токен уровня приложения (из памяти или
+    /// новый), ничего больше не вызывая. Для `auth app-secret set` и `auth status`.
+    pub async fn authenticate_app(&self, app_id: &str) -> Result<(), ApiError> {
+        let tokens = self
+            .apps
+            .get(app_id)
+            .ok_or_else(|| ApiError::MissingAppCredentials {
+                app_id: app_id.to_owned(),
+                profile: self.config.profile.clone(),
+            })?;
+        tokens.token().await?;
+        Ok(())
+    }
+
+    /// Проекты, для которых у клиента есть API-клиент проекта, по порядку.
+    pub fn project_ids(&self) -> Vec<&str> {
+        self.projects.keys().map(String::as_str).collect()
     }
 
     pub fn config(&self) -> &ClientConfig {
@@ -759,6 +1168,51 @@ impl ApiClient {
         Ok(())
     }
 
+    /// Подпись запроса: токен приложения у запросов IAP, иначе API-клиент.
+    fn signer_for(&self, request: &ApiRequest) -> Result<Signer<'_>, ApiError> {
+        if !request.service.is_iap() {
+            return self.auth_for(request).map(Signer::Connect);
+        }
+        if request.service == ApiService::IapKit {
+            // Подписи JWT ключом IAP Kit нет: такие операции исключены и сюда не доходят.
+            return Err(ApiError::InvalidRequest(
+                "the HarmonyOS IAP Kit server API is not supported by this server".into(),
+            ));
+        }
+        if request.project.is_some() {
+            return Err(ApiError::InvalidRequest(
+                "an HMS IAP request cannot be signed with a project-level API client".into(),
+            ));
+        }
+        let Some(app_id) = &request.app else {
+            return Err(ApiError::InvalidRequest(
+                "an HMS IAP request needs the app ID of the app whose secret signs it".into(),
+            ));
+        };
+        self.apps
+            .get(app_id)
+            .map(Signer::App)
+            .ok_or_else(|| ApiError::MissingAppCredentials {
+                app_id: app_id.clone(),
+                profile: self.config.profile.clone(),
+            })
+    }
+
+    /// Авторизация запроса: клиента проекта ([`ApiRequest::project`]) или команды.
+    fn auth_for(&self, request: &ApiRequest) -> Result<&Auth, ApiError> {
+        match &request.project {
+            Some(project_id) => {
+                self.projects
+                    .get(project_id)
+                    .ok_or_else(|| ApiError::MissingProjectCredentials {
+                        project_id: project_id.clone(),
+                        profile: self.config.profile.clone(),
+                    })
+            }
+            None => self.auth.as_ref().ok_or(ApiError::MissingCredentials),
+        }
+    }
+
     /// Заменяет известные клиенту секреты (текущий и недавние токены, секрет и
     /// идентификатор клиента) и секреты по виду на `***`. Защита в глубину для текстов,
     /// которые уходят агенту: секрет не должен попасть в ответ, даже если API его отразил.
@@ -775,18 +1229,50 @@ impl ApiClient {
     /// Значения, которые вырезаются точным совпадением.
     fn known_secrets(&self) -> Vec<zeroize::Zeroizing<String>> {
         let mut secrets = Vec::new();
-        if let Some(auth) = &self.auth {
+        for auth in self.auth.iter().chain(self.projects.values()) {
             for token in auth.tokens.known_tokens() {
                 secrets.push(zeroize::Zeroizing::new(token.expose().to_owned()));
             }
         }
-        if let Some(credentials) = &self.config.credentials {
+        let projects = self
+            .config
+            .projects
+            .iter()
+            .map(ProjectCredentials::credentials);
+        for credentials in self.config.credentials.iter().chain(projects) {
             secrets.push(zeroize::Zeroizing::new(
                 credentials.client_secret().expose().to_owned(),
             ));
             secrets.push(zeroize::Zeroizing::new(
                 credentials.client_id().expose().to_owned(),
             ));
+        }
+        // Вход пользователя: refresh token и client secret. Client ID OAuth-клиента — это
+        // идентификатор приложения (`appId`), он законно встречается в ответах и не
+        // вырезается.
+        if let Some(session) = &self.config.oauth {
+            let credentials = &session.credentials;
+            secrets.push(zeroize::Zeroizing::new(
+                credentials.expose_refresh_token().to_owned(),
+            ));
+            if let Some(secret) = credentials.client().client_secret() {
+                secrets.push(zeroize::Zeroizing::new(secret.expose().to_owned()));
+            }
+        }
+        // Секреты приложений и их токены — и как есть, и в виде значения заголовка
+        // `Basic base64("APPAT:" + token)`. App ID — обычный аргумент инструментов, его не
+        // вырезаем.
+        for app in &self.config.apps {
+            secrets.extend(app.secret_values());
+        }
+        for tokens in self.apps.values() {
+            for token in tokens.known_tokens() {
+                secrets.push(zeroize::Zeroizing::new(token.expose().to_owned()));
+                let header = app_authorization(&token);
+                if let Some(encoded) = header.strip_prefix("Basic ") {
+                    secrets.push(zeroize::Zeroizing::new(encoded.to_owned()));
+                }
+            }
         }
         secrets
     }
@@ -815,10 +1301,22 @@ impl ApiClient {
         request: ApiRequest,
         max_response_bytes: usize,
     ) -> Result<ApiResponse, ApiError> {
-        let Some(auth) = &self.auth else {
-            return Err(ApiError::MissingCredentials);
-        };
-        let url = self.build_url(&request.path, &request.query)?;
+        let signer = self.signer_for(&request)?;
+        if let Signer::Connect(auth) = &signer
+            && matches!(auth.kind, AuthKind::User { .. })
+            && !request.auth_modes.is_empty()
+            && !request.auth_modes.contains(&AuthMode::OAuthClient)
+        {
+            let modes: Vec<&str> = request.auth_modes.iter().map(|mode| mode.title()).collect();
+            return Err(ApiError::UnsupportedAuthMode {
+                operation: request
+                    .operation
+                    .clone()
+                    .unwrap_or_else(|| request.path.clone()),
+                modes: modes.join(", "),
+            });
+        }
+        let url = self.build_url(request.service, &request.path, &request.query)?;
         let extra_headers = request_headers(&request.headers)?;
         let body = request.body.clone().map(normalize_json_body);
 
@@ -826,6 +1324,8 @@ impl ApiClient {
             method = request.method.as_str(),
             path = %request.path,
             operation = request.operation.as_deref().unwrap_or(""),
+            project_client = request.project.is_some(),
+            service = request.service.slug(),
             "AppGallery Connect API request"
         );
 
@@ -835,14 +1335,16 @@ impl ApiClient {
         let response = loop {
             // Токен берётся перед каждой попыткой: после долгой паузы на повтор он мог
             // подойти к концу срока, тогда источник получит новый.
-            let token = auth.tokens.token().await?;
-            let mut builder = self
+            let token = signer.tokens().token().await?;
+            let builder = self
                 .http
                 .request(request.method.to_reqwest(), url.clone())
                 .headers(extra_headers.clone())
-                .header(header::ACCEPT, ACCEPT_JSON)
-                .header(CLIENT_ID_HEADER, auth.client_id.clone())
-                .header(header::AUTHORIZATION, authorization(&token)?);
+                .header(header::ACCEPT, ACCEPT_JSON);
+            let mut builder = match &signer {
+                Signer::Connect(auth) => auth.apply(builder, &token)?,
+                Signer::App(_) => builder.header(header::AUTHORIZATION, app_header(&token)?),
+            };
             if let Some(body) = &body {
                 builder = builder.json(body);
             }
@@ -877,13 +1379,15 @@ impl ApiClient {
             if status == StatusCode::UNAUTHORIZED && !token_renewed {
                 token_renewed = true;
                 drop(response);
-                auth.tokens.invalidate(&token).await;
+                signer.tokens().invalidate(&token).await;
                 tracing::debug!("AppGallery Connect API returned 401, retrying with a new token");
                 continue;
             }
 
             let retry_after = parse_retry_after(response.headers());
-            let mut error = self.http_error(status, retry_after, response).await;
+            let mut error = self
+                .http_error(status, retry_after, response, request.result)
+                .await;
             if request.idempotent && is_retryable_status(status) && attempt < retry.max_retries {
                 let delay = retry_after.unwrap_or_else(|| backoff(retry.default_delay, attempt));
                 if delay <= retry.max_delay {
@@ -899,6 +1403,7 @@ impl ApiClient {
                 }
             }
             error.operation = request.operation.clone();
+            error.service = request.service;
             return Err(ApiError::Http(Box::new(error)));
         };
 
@@ -919,6 +1424,7 @@ impl ApiClient {
                 message: result.message.as_deref().map(|m| self.redact_text(m)),
                 operation: request.operation.clone(),
                 envelope: result.envelope,
+                service: request.service,
             })));
         }
         Ok(ApiResponse {
@@ -960,9 +1466,29 @@ impl ApiClient {
         self.transfer.download_to_file(url, destination).await
     }
 
-    /// Собирает URL: корень API + проверенный относительный путь + query.
-    fn build_url(&self, path: &str, query: &[(String, String)]) -> Result<url::Url, ApiError> {
-        validate_api_path(path)?;
+    /// Корень сервиса: хост региона профиля, а при подмене корня (тесты) — тот же
+    /// loopback-адрес для всех сервисов.
+    fn service_base(&self, service: ApiService) -> Result<url::Url, ApiError> {
+        if !service.is_iap() || self.config.base_url.is_some() {
+            return Ok(self.base.clone());
+        }
+        url::Url::parse(&service.base_url(self.config.region)).map_err(|err| {
+            ApiError::InvalidConfig(format!("address of {}: {err}", service.title()))
+        })
+    }
+
+    /// Собирает URL: корень сервиса + проверенный относительный путь + query.
+    fn build_url(
+        &self,
+        service: ApiService,
+        path: &str,
+        query: &[(String, String)],
+    ) -> Result<url::Url, ApiError> {
+        if service.is_iap() {
+            validate_service_path(path)?;
+        } else {
+            validate_api_path(path)?;
+        }
         for (key, _) in query {
             if key.is_empty() {
                 return Err(ApiError::InvalidRequest(
@@ -971,7 +1497,8 @@ impl ApiClient {
             }
         }
 
-        let mut url = self.base.clone();
+        let base = self.service_base(service)?;
+        let mut url = base.clone();
         // Путь уже состоит только из pchar и `%XX`, поэтому set_path его не меняет.
         url.set_path(path);
         url.set_fragment(None);
@@ -993,7 +1520,7 @@ impl ApiClient {
 
         // Повторная проверка: итоговый адрес обязан остаться в origin API, а путь — тем,
         // что проверяли.
-        if url.origin() != self.base.origin() || url.path() != path {
+        if url.origin() != base.origin() || url.path() != path {
             return Err(ApiError::InvalidPath(format!(
                 "the path leads outside the AppGallery Connect API host: `{}`",
                 shorten(path)
@@ -1007,6 +1534,7 @@ impl ApiClient {
         status: StatusCode,
         retry_after: Option<Duration>,
         mut response: reqwest::Response,
+        result: ResultCheck,
     ) -> HttpError {
         let mut error = HttpError {
             status: status.as_u16(),
@@ -1022,7 +1550,14 @@ impl ApiClient {
             Ok((bytes, truncated)) => {
                 if !truncated
                     && let Ok(value) = serde_json::from_slice::<Value>(&bytes)
-                    && let Some(result) = detect_result(&value)
+                    && let Some(result) = match result {
+                        // Сначала конверт операции: у IAP он в корне тела, его нет среди
+                        // известных конвертов AppGallery Connect API.
+                        ResultCheck::Envelope(def) => {
+                            read_result(&value, &def).or_else(|| detect_result(&value))
+                        }
+                        _ => detect_result(&value),
+                    }
                 {
                     error.code = Some(self.redact_text(&result.code));
                     error.message = result.message.as_deref().map(|m| self.redact_text(m));
@@ -1106,6 +1641,30 @@ fn authorization(token: &AccessToken) -> Result<HeaderValue, ApiError> {
     Ok(value)
 }
 
+/// Заголовок `oauth2Token: <token>` (без `Bearer`), помеченный как sensitive.
+fn raw_token(token: &AccessToken) -> Result<HeaderValue, ApiError> {
+    let mut value = HeaderValue::from_str(token.expose()).map_err(|_| {
+        ApiError::Token(TokenError::InvalidResponse(
+            "the access token is not a valid header value".into(),
+        ))
+    })?;
+    value.set_sensitive(true);
+    Ok(value)
+}
+
+/// Заголовок `Authorization: Basic base64("APPAT:" + token)` запроса IAP, помеченный как
+/// sensitive.
+fn app_header(token: &AccessToken) -> Result<HeaderValue, ApiError> {
+    let text = app_authorization(token);
+    let mut value = HeaderValue::from_str(&text).map_err(|_| {
+        ApiError::Token(TokenError::InvalidResponse(
+            "the app-level access token is not a valid header value".into(),
+        ))
+    })?;
+    value.set_sensitive(true);
+    Ok(value)
+}
+
 /// Пауза без `Retry-After`: `default_delay * 2^attempt`.
 fn backoff(default_delay: Duration, attempt: u32) -> Duration {
     default_delay.saturating_mul(1u32 << attempt.min(16))
@@ -1172,11 +1731,13 @@ mod tests {
             "Proxy-Connection",
             "Sec-Fetch-Site",
             "oauth2Token",
+            "teamId",
+            "TEAMID",
             "User-Agent",
         ] {
             assert!(is_forbidden_request_header(name), "{name}");
         }
-        for name in ["appId", "teamId", "X-Custom", "Accept-Language"] {
+        for name in ["appId", "userID", "X-Custom", "Accept-Language"] {
             assert!(!is_forbidden_request_header(name), "{name}");
         }
     }
@@ -1215,6 +1776,40 @@ mod tests {
     }
 
     #[test]
+    fn iap_requests_go_to_the_service_host_of_the_region() {
+        let client = ApiClient::new(ClientConfig::new(Region::Ru, None)).unwrap();
+        let url = client
+            .build_url(
+                ApiService::IapSubscriptions,
+                "/sub/applications/v2/purchases/get",
+                &[],
+            )
+            .unwrap();
+        assert_eq!(
+            url.as_str(),
+            "https://subscr-drru.iap.cloud.huawei.ru/sub/applications/v2/purchases/get"
+        );
+        let url = client
+            .build_url(ApiService::Connect, "/api/publish/v2/app-info", &[])
+            .unwrap();
+        assert_eq!(url.host_str(), Some("connect-api-drru.cloud.huawei.com"));
+        assert!(
+            client
+                .build_url(ApiService::IapOrders, "/api/publish/v2/app-info", &[])
+                .is_err()
+        );
+        assert!(
+            client
+                .build_url(
+                    ApiService::Connect,
+                    "/applications/v2/purchases/confirm",
+                    &[]
+                )
+                .is_err()
+        );
+    }
+
+    #[test]
     fn backoff_doubles() {
         let base = Duration::from_millis(100);
         assert_eq!(backoff(base, 0), base);
@@ -1243,6 +1838,7 @@ mod tests {
             message: Some("app not found".into()),
             operation: None,
             envelope: crate::envelope::RESULT_RET_CODE,
+            service: ApiService::Connect,
         };
         assert_eq!(
             result.to_string(),

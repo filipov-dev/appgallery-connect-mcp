@@ -23,7 +23,11 @@
 //!   методу; запрос выше уровня сервера отклоняется с названием нужного флага. Наборы
 //!   инструментов `api_request` не ограничивают;
 //! - конверт результата — конверт совпавшей операции ([`ResultCheck::Envelope`]), иначе
-//!   определяется по телу ([`ResultCheck::Detect`]).
+//!   определяется по телу ([`ResultCheck::Detect`]);
+//! - путь операции, которой нужен API-клиент проекта (`OperationDef::project_param`),
+//!   подписывается клиентом проекта из того же параметра пути, query или заголовка, что и у
+//!   её инструмента ([`ApiRequest::select_project`]); без него — ошибка до запроса. Путь
+//!   без операции в таблице подписывает клиент команды.
 //!
 //! Ответ проходит ту же постобработку, что и ответы инструментов операций (вырезание
 //! секретов, фильтр `jq`, пометка `note`, лимит размера): её делает сервер. Аргумент `jq`
@@ -42,7 +46,7 @@ use serde_json::{Value, json};
 
 use crate::error::ToolError;
 use crate::jq::{JQ_ARG, add_jq_argument};
-use crate::registry::{access_flag, access_name, annotations};
+use crate::registry::{access_hint, access_name, annotations};
 use crate::validate::kind;
 
 use routes::{RouteMatch, blocked_operation, percent_decode, route};
@@ -60,7 +64,7 @@ const CREDENTIAL_NAME_PARTS: &[&str] = &[
 ];
 
 /// Описание инструмента; аннотации — по максимальному уровню сервера.
-pub fn api_request_tool(max_access: AccessLevel) -> Tool {
+pub fn api_request_tool(max_access: AccessLevel, http: bool) -> Tool {
     let methods = match max_access {
         AccessLevel::Read => {
             "GET, and POST requests that only read (such as product and promotion searches)"
@@ -120,7 +124,7 @@ pub fn api_request_tool(max_access: AccessLevel) -> Tool {
          that are not enabled, and paths that `api_search` finds without a tool. Prefer the \
          dedicated tool when one is registered: it validates arguments and documents the \
          schema. The access level is taken from the operation the method and path match; \
-         requests above the server's level are rejected with the flag that enables them. Errors \
+         requests above the server's level are rejected with {}. Errors \
          reported with HTTP 200 and a non-zero result code are returned as tool errors. \
          Authorization and `client_id` are added by the server and cannot be overridden; only \
          relative `/api/...` paths are accepted. The token endpoint and the upload steps of the \
@@ -128,6 +132,11 @@ pub fn api_request_tool(max_access: AccessLevel) -> Tool {
          optional `jq` filter selects parts of a JSON response.",
         access_name(max_access),
         methods,
+        if http {
+            "a hint to ask for an access token with that level"
+        } else {
+            "the flag that enables them"
+        },
     );
     let mut tool = Tool::new(API_REQUEST_TOOL, description, Arc::new(schema));
     tool.title = Some("AppGallery Connect API request".to_owned());
@@ -161,7 +170,11 @@ impl Prepared {
 }
 
 /// Проверяет аргументы и собирает запрос (см. описание модуля).
-pub fn prepare(args: &JsonObject, max_access: AccessLevel) -> Result<Prepared, ToolError> {
+pub fn prepare(
+    args: &JsonObject,
+    max_access: AccessLevel,
+    http: bool,
+) -> Result<Prepared, ToolError> {
     reject_unknown(args)?;
     let get = |name: &str| args.get(name).filter(|v| !v.is_null());
     let text = |name: &str| -> Result<Option<&str>, ToolError> {
@@ -243,12 +256,16 @@ pub fn prepare(args: &JsonObject, max_access: AccessLevel) -> Result<Prepared, T
             None => " (unknown path: the level is taken from the method)".to_owned(),
         };
         return Err(ToolError::new(format!(
-            "`{} {path}`{what} needs {} access, but the server runs with {} access. Ask the \
-             user to restart the server with {} if this change is intended",
+            "`{} {path}`{what} needs {} access, but {} {} access. {}",
             method.as_str(),
             access_name(route.access),
+            if http {
+                "this access token has"
+            } else {
+                "the server runs with"
+            },
             access_name(max_access),
-            access_flag(route.access),
+            access_hint(route.access, http),
         )));
     }
 
@@ -275,6 +292,13 @@ pub fn prepare(args: &JsonObject, max_access: AccessLevel) -> Result<Prepared, T
                 None => ResultCheck::Detect,
             };
             request.operation = Some(op.tool_name.to_owned());
+            request.select_project(op).map_err(|err| {
+                ToolError::new(format!(
+                    "`{} {path}` is the operation `{}`: {err}",
+                    method.as_str(),
+                    op.tool_name
+                ))
+            })?;
         }
         Some(RouteMatch::Excluded(op)) => {
             request.result = ResultCheck::Detect;
@@ -444,7 +468,7 @@ mod tests {
     }
 
     fn prepare_with(value: Value, access: AccessLevel) -> Result<Prepared, ToolError> {
-        prepare(&args(value), access)
+        prepare(&args(value), access, false)
     }
 
     fn error(value: Value, access: AccessLevel) -> String {
@@ -529,6 +553,32 @@ mod tests {
         );
         assert!(message.contains("--allow-destructive"), "{message}");
         assert!(message.contains("unknown path"), "{message}");
+    }
+
+    #[test]
+    fn http_mode_asks_for_an_access_token_instead_of_flags() {
+        let submit = json!({"method": "POST", "path": "/api/publish/v2/app-submit"});
+        let message = prepare(&args(submit.clone()), AccessLevel::Write, true)
+            .unwrap_err()
+            .message()
+            .to_owned();
+        assert!(
+            message.contains("this access token has write access"),
+            "{message}"
+        );
+        assert!(
+            message.contains("access token with the destructive level"),
+            "{message}"
+        );
+        assert!(message.contains("server operator"), "{message}");
+        assert!(!message.contains("--allow-"), "{message}");
+        assert!(prepare(&args(submit), AccessLevel::Destructive, true).is_ok());
+
+        let description = api_request_tool(AccessLevel::Read, true)
+            .description
+            .unwrap();
+        assert!(!description.contains("flag"), "{description}");
+        assert!(description.contains("access token"), "{description}");
     }
 
     #[test]
@@ -620,6 +670,7 @@ mod tests {
             json!({"client_id": "1"}),
             json!({"Client-Id": "1"}),
             json!({"oauth2Token": "x"}),
+            json!({"teamId": "1"}),
             json!({"Host": "example.com"}),
             json!({"Content-Type": "text/plain"}),
             json!({"Proxy-Authorization": "x"}),
@@ -653,7 +704,7 @@ mod tests {
         // Обычный заголовок операции проходит.
         assert!(
             prepare_with(
-                json!({"path": info, "headers": {"teamId": "1"}}),
+                json!({"path": info, "headers": {"appId": "1"}}),
                 AccessLevel::Read
             )
             .is_ok()
@@ -736,7 +787,7 @@ mod tests {
             (AccessLevel::Write, Some(false), Some(false)),
             (AccessLevel::Destructive, Some(false), Some(true)),
         ] {
-            let tool = api_request_tool(access);
+            let tool = api_request_tool(access, false);
             let a = tool.annotations.unwrap();
             assert_eq!(
                 (a.read_only_hint, a.destructive_hint),

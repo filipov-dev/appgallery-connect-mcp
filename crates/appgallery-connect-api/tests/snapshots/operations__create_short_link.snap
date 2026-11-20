@@ -1,0 +1,238 @@
+---
+source: crates/appgallery-connect-api/tests/operations.rs
+assertion_line: 694
+expression: "snapshot_view(op(\"create_short_link\"))"
+---
+{
+  "access": "write",
+  "auth_modes": [
+    "api-client",
+    "service-account"
+  ],
+  "body": "Json",
+  "description": "The link is made from a long link (`longUrl`) or from link details (`linkInfo`; it wins when both are passed). The URL prefix (`uriPrefix`, like `https://example.drcn.agconnect.link`) must be requested in AppGallery Connect > the project > App Linking beforehand. The link is public: anyone who gets it can open it until it expires (two years by default, `expireTime`). Links created through the API are not shown in AppGallery Connect, and the API cannot list, change or delete them: check the details before creating a link that will be sent to users. Up to 100,000 short links per project per day.\n\nProject-level API client: the server signs this request with the API client of the project given in `productId`, not with its team-level API client. The user adds it with `appgallery-connect-mcp auth project add`.",
+  "group": "applinking",
+  "input_schema": {
+    "additionalProperties": false,
+    "properties": {
+      "body": {
+        "description": "Request body: JSON object.",
+        "properties": {
+          "expireTime": {
+            "description": "Validity period of the short link in seconds, an integer greater than 300. Default: two years.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "linkInfo": {
+            "description": "Details of the cross-platform link. Pass either longUrl or linkInfo; linkInfo wins when both are passed.",
+            "properties": {
+              "android": {
+                "description": "Android app: deep link, package name and what to open when the app is not installed.",
+                "properties": {
+                  "deepLink": {
+                    "description": "Deep link of the Android app, used first to open the app on an Android device.",
+                    "type": "string"
+                  },
+                  "fallbackUrl": {
+                    "description": "URL opened when the Android app is not installed (openType 3).",
+                    "type": "string"
+                  },
+                  "openType": {
+                    "description": "What opens when the Android app is not installed: 1 the app page on AppGallery (packageName is required, do not pass fallbackUrl), 2 the app page in the local app store of the device, 3 a custom URL (fallbackUrl is required). Default: 1 with packageName only, 3 with packageName and fallbackUrl.",
+                    "type": "integer"
+                  },
+                  "packageName": {
+                    "description": "Package name of the Android app, as configured in AppGallery Connect.",
+                    "type": "string"
+                  }
+                },
+                "type": "object"
+              },
+              "campaign": {
+                "description": "Campaign tracing parameters added to the link: channel, medium and campaign name.",
+                "properties": {
+                  "channel": {
+                    "description": "Channel, like Huawei, or a custom value.",
+                    "type": "string"
+                  },
+                  "medium": {
+                    "description": "Medium, like cpc or email.",
+                    "type": "string"
+                  },
+                  "name": {
+                    "description": "Campaign name, like a New Year promotion.",
+                    "type": "string"
+                  }
+                },
+                "type": "object"
+              },
+              "deepLink": {
+                "description": "Deep link: the page users are directed to when they tap the link. It must be a valid, accessible URL.",
+                "type": "string"
+              },
+              "harmonyos": {
+                "description": "HarmonyOS app: deep link, package name and what to open when the app is not installed.",
+                "properties": {
+                  "deepLink": {
+                    "description": "Deep link of the HarmonyOS app, used first to open the app on a HarmonyOS device.",
+                    "type": "string"
+                  },
+                  "fallbackUrl": {
+                    "description": "URL opened when the HarmonyOS app is not installed.",
+                    "type": "string"
+                  },
+                  "packageName": {
+                    "description": "Package name of the HarmonyOS app, as configured in AppGallery Connect.",
+                    "type": "string"
+                  }
+                },
+                "type": "object"
+              },
+              "ios": {
+                "description": "iOS app: deep link, bundle ID, what to open when the app is not installed, iPad app and App Store campaign parameters.",
+                "properties": {
+                  "appStoreCampaign": {
+                    "description": "App Store Connect campaign parameters.",
+                    "properties": {
+                      "affiliateToken": {
+                        "description": "iTunes affiliate token (a public campaign parameter, not a credential).",
+                        "type": "string"
+                      },
+                      "campaignToken": {
+                        "description": "Campaign tracing parameter.",
+                        "type": "string"
+                      },
+                      "mediaType": {
+                        "description": "Media type: 1 music, 2 podcasts, 3 audiobooks, 4 TV shows, 5 music videos, 6 movies, 7 iPod games, 8 mobile apps, 9 ringtones, 10 iTunes U, 11 e-books, 12 desktop apps.",
+                        "type": "string"
+                      },
+                      "providerToken": {
+                        "description": "Apple provider ID from App Store Connect App Analytics.",
+                        "type": "string"
+                      }
+                    },
+                    "type": "object"
+                  },
+                  "bundleId": {
+                    "description": "Bundle ID of the iOS app, as configured in AppGallery Connect.",
+                    "type": "string"
+                  },
+                  "deepLink": {
+                    "description": "URL opened on an iOS device.",
+                    "type": "string"
+                  },
+                  "fallbackUrl": {
+                    "description": "URL opened when the iOS app is not installed.",
+                    "type": "string"
+                  },
+                  "ipad": {
+                    "description": "iPad app.",
+                    "properties": {
+                      "bundleId": {
+                        "description": "Bundle ID of the iPad app.",
+                        "type": "string"
+                      },
+                      "fallbackUrl": {
+                        "description": "URL opened when the iPad app is not installed.",
+                        "type": "string"
+                      }
+                    },
+                    "type": "object"
+                  }
+                },
+                "type": "object"
+              },
+              "landingPageType": {
+                "description": "Whether to show the landing page when the app is not installed: 1 shown, 2 not shown (the app page in the store opens). Default: 2.",
+                "type": "integer"
+              },
+              "previewType": {
+                "description": "Preview page shown when the link is opened in a browser: 1 based on the app information, 2 based on socialCard. Default: 2 when socialCard is passed, otherwise 1.",
+                "type": "integer"
+              },
+              "socialCard": {
+                "description": "Social meta tag: what is shown when the link is shared on social media.",
+                "properties": {
+                  "desc": {
+                    "description": "Description shown when the link is shared on social media.",
+                    "type": "string"
+                  },
+                  "imageUrl": {
+                    "description": "URL of the image shown when the link is shared: at least 300 x 200 px and less than 300 KB.",
+                    "type": "string"
+                  },
+                  "title": {
+                    "description": "Title shown when the link is shared on social media.",
+                    "type": "string"
+                  }
+                },
+                "type": "object"
+              },
+              "uriPrefix": {
+                "description": "URL prefix of the link, like https://example.drcn.agconnect.link, requested in AppGallery Connect beforehand.",
+                "type": "string"
+              }
+            },
+            "required": [
+              "uriPrefix",
+              "deepLink"
+            ],
+            "type": "object"
+          },
+          "longUrl": {
+            "description": "Long link of a cross-platform link to shorten (see Manually Creating a Cross-Platform Link in the App Linking guide); query parameters must be URL-encoded. Pass either longUrl or linkInfo.",
+            "type": "string"
+          },
+          "suffixLength": {
+            "description": "Length of the short link suffix: SHORT (four or more characters, default) or LONG (17 characters).",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "productId": {
+        "description": "Project ID (AppGallery Connect > My projects > the project > Project settings). The server signs the request with the project-level API client of this project.",
+        "type": "string"
+      }
+    },
+    "required": [
+      "productId",
+      "body"
+    ],
+    "type": "object"
+  },
+  "method": "POST",
+  "operation_id": "applinking.link.create",
+  "params": [
+    {
+      "api_name": "productId",
+      "description": "Project ID (AppGallery Connect > My projects > the project > Project settings). The server signs the request with the project-level API client of this project.",
+      "location": "Header",
+      "name": "productId",
+      "repeated": false,
+      "required": true,
+      "value_type": "String"
+    },
+    {
+      "api_name": "body",
+      "description": "Request body: JSON object.",
+      "location": "Body",
+      "name": "body",
+      "repeated": false,
+      "required": true,
+      "value_type": "Object"
+    }
+  ],
+  "path": "/api/applinking/v1/links",
+  "project_param": "productId",
+  "reference": "https://developer.huawei.com/consumer/en/doc/development/AppGallery-connect-References/applinking-create-0000001141716380",
+  "response": "Json",
+  "result": {
+    "code_field": "code",
+    "field": "ret",
+    "message_field": "msg"
+  },
+  "summary": "Creates a short link of an App Linking cross-platform link.",
+  "tool_name": "create_short_link",
+  "toolset": "app-linking"
+}

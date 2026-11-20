@@ -1,0 +1,91 @@
+---
+source: crates/appgallery-connect-api/tests/operations.rs
+expression: "snapshot_view(op(\"verify_product_purchase\"))"
+---
+{
+  "access": "read",
+  "auth_modes": [],
+  "body": "Json",
+  "description": "Only the latest purchase token of a product can be verified: after a consumable is confirmed and bought again, the earlier token returns result code 12. Check that productId, price and currency of the purchase data match the order before delivering the product. For subscriptions use the subscription query (`get_subscription_purchase`).\n\nRead-only: the POST request of HMS IAP only reads purchase data.\n\nApp secret: this HMS In-App Purchases server API is not part of the AppGallery Connect API. The server signs the request with an app-level access token of the app given in `appId`, obtained with the stored app secret of that app, not with its API client. The user stores the app secret with `appgallery-connect-mcp auth app-secret set`. `api_request` cannot call this operation.\n\nResponse: `purchaseTokenData` is a JSON string in the API response; the server parses it into a JSON value. The server removes `dataSignature` and `signatureAlgorithm`: the signature covers the original JSON string of the purchase data, which the server parses into an object, so it cannot be verified from this response. A backend that verifies signatures calls the IAP service itself.",
+  "group": "orders",
+  "input_schema": {
+    "additionalProperties": false,
+    "properties": {
+      "appId": {
+        "description": "App ID of the app whose app secret signs this request (My apps > the app > App information). It selects the stored app secret and is not sent to Huawei.",
+        "pattern": "^[0-9]{1,20}$",
+        "type": "string"
+      },
+      "body": {
+        "description": "Request body: `IapPurchaseRequest` object. Purchase of a consumable or non-consumable.",
+        "properties": {
+          "productId": {
+            "description": "Product ID, as set in AppGallery Connect.",
+            "type": "string"
+          },
+          "purchaseToken": {
+            "description": "Purchase token from the purchase data (InAppPurchaseData) that the IAP client returns after a purchase or a purchase query.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "purchaseToken",
+          "productId"
+        ],
+        "type": "object"
+      }
+    },
+    "required": [
+      "appId",
+      "body"
+    ],
+    "type": "object"
+  },
+  "json_strings": [
+    "purchaseTokenData"
+  ],
+  "method": "POST",
+  "omitted": [
+    {
+      "path": "dataSignature",
+      "reason": "the signature covers the original JSON string of the purchase data, which the server parses into an object, so it cannot be verified from this response. A backend that verifies signatures calls the IAP service itself."
+    },
+    {
+      "path": "signatureAlgorithm",
+      "reason": "the signature covers the original JSON string of the purchase data, which the server parses into an object, so it cannot be verified from this response. A backend that verifies signatures calls the IAP service itself."
+    }
+  ],
+  "operation_id": "orders.purchaseToken.verify",
+  "params": [
+    {
+      "api_name": "appId",
+      "description": "App ID of the app whose app secret signs this request (My apps > the app > App information). It selects the stored app secret and is not sent to Huawei.",
+      "location": "Credential",
+      "name": "appId",
+      "repeated": false,
+      "required": true,
+      "value_type": "String"
+    },
+    {
+      "api_name": "body",
+      "description": "Request body: `IapPurchaseRequest` object. Purchase of a consumable or non-consumable.",
+      "location": "Body",
+      "name": "body",
+      "repeated": false,
+      "required": true,
+      "value_type": "Object"
+    }
+  ],
+  "path": "/applications/purchases/tokens/verify",
+  "reference": "https://developer.huawei.com/consumer/en/doc/development/HMSCore-References/api-order-verify-purchase-token-0000001050746113",
+  "response": "Json",
+  "result": {
+    "code_field": "responseCode",
+    "field": "",
+    "message_field": "responseMessage"
+  },
+  "service": "iap-orders",
+  "summary": "Verifies the purchase token of a consumable or non-consumable and returns its purchase data.",
+  "tool_name": "verify_product_purchase",
+  "toolset": "purchases"
+}

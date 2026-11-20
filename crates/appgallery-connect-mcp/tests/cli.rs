@@ -1,6 +1,7 @@
-//! Настоящий бинарник: ошибки `auth login`, `connect` и `serve`, которые случаются до обращения
-//! к системному хранилищу и к сети. Каталог настроек — временный; системный keychain не трогается:
-//! каждый сценарий завершается ошибкой раньше, чем команда доходит до хранилища.
+//! Настоящий бинарник: ошибки `auth login`, `connect`, `serve` и `key exec`, которые
+//! случаются до обращения к системному хранилищу и к сети. Каталог настроек — временный;
+//! системный keychain не трогается: каждый сценарий завершается ошибкой раньше, чем команда
+//! доходит до хранилища.
 
 use std::io::Write;
 use std::path::Path;
@@ -174,5 +175,63 @@ fn serve_reports_startup_errors_in_stderr() {
         assert!(stderr.starts_with("error: "), "{args:?}: {stderr}");
         assert!(stderr.contains(expected), "{args:?}: {stderr}");
         assert!(!stderr.contains("panicked"), "{args:?}: {stderr}");
+    }
+}
+
+/// Ошибки `key exec` до обращения к хранилищу: ненулевой код, команда не запускается.
+#[test]
+fn key_exec_rejects_bad_input_before_the_keychain() {
+    let dir = tempfile::tempdir().unwrap();
+    let config = dir.path();
+    let marker = dir.path().join("ran");
+    let marker = marker.to_string_lossy();
+    for (args, expected) in [
+        (
+            vec!["key", "exec", "--env", "1BAD", "--", "touch", &marker],
+            "invalid environment variable name",
+        ),
+        (
+            vec![
+                "key",
+                "exec",
+                "--env",
+                "HUAWEI_CLIENT_SECRET",
+                "--",
+                "touch",
+                &marker,
+            ],
+            "holds a credential",
+        ),
+        (
+            vec![
+                "key",
+                "exec",
+                "--profile",
+                "bad name",
+                "--",
+                "touch",
+                &marker,
+            ],
+            "profile",
+        ),
+        (vec!["key", "exec"], "COMMAND"),
+    ] {
+        let output = run(config, &args, None);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(!output.status.success(), "{args:?}: {stderr}");
+        assert!(stderr.contains(expected), "{args:?}: {stderr}");
+        assert!(!stderr.contains("panicked"), "{args:?}: {stderr}");
+        assert!(!dir.path().join("ran").exists(), "{args:?}");
+    }
+    let output = run(config, &["key", "exec", "--help"], None);
+    let help = String::from_utf8_lossy(&output.stdout);
+    assert!(output.status.success());
+    for expected in [
+        "APPGALLERY_CONNECT_CREDENTIALS_FILE",
+        "--format",
+        "dotenv",
+        "0600",
+    ] {
+        assert!(help.contains(expected), "{expected}: {help}");
     }
 }

@@ -1,0 +1,58 @@
+# Пример запуска appgallery-connect-mcp в HTTP-режиме (docs/http.md).
+#
+#   AGC_CLIENT_ID=<client ID> AGC_REGION=cn docker compose up --build -d
+#   curl http://127.0.0.1:8769/health
+#
+# Рядом с этим файлом нужны:
+#   tokens.toml               — SHA-256 токенов доступа клиентов (сами токены здесь не
+#                               хранятся);
+#   secrets/agc-client-secret — секрет API-клиента AppGallery Connect (одна строка);
+#                               владелец — uid 10001 (пользователь контейнера), права 0600
+#                               или 0400:
+#                                 sudo chown 10001 secrets/agc-client-secret
+#                                 chmod 600 secrets/agc-client-secret
+# Идентификатор клиента — не секрет: он передаётся флагом --client-id (здесь — из
+# переменной AGC_CLIENT_ID, которую подставляет compose). Регион (cn, de, sg, ru) — из
+# AGC_REGION, обязательно: профиля в контейнере нет, и регион по умолчанию не подставляется. Секрет в образ не попадает и наружу не отдаётся: клиенты MCP приходят только
+# со своими токенами доступа в заголовке Authorization.
+services:
+  appgallery-connect-mcp:
+    build: .
+    image: appgallery-connect-mcp:local
+    # Флаги serve: уровень доступа сервера (потолок для токенов), наборы по умолчанию и
+    # т. п. добавляйте сюда, например --allow-write или --toolsets apps,releases.
+    # --allowed-host appgallery-connect-mcp — для других контейнеров этой сети, которые
+    # обращаются к серверу по имени сервиса (http://appgallery-connect-mcp:8769/mcp).
+    command:
+      - serve
+      - --http
+      - --listen
+      - 0.0.0.0:8769
+      - --allowed-host
+      - appgallery-connect-mcp
+      - --access-tokens
+      - /etc/appgallery-connect-mcp/tokens.toml
+      - --secret-file
+      - /run/secrets/agc-client-secret
+      - --client-id
+      - ${AGC_CLIENT_ID:?set AGC_CLIENT_ID to the API client ID}
+      - --region
+      - ${AGC_REGION:?set AGC_REGION to the site of the API client - cn, de, sg or ru}
+    ports:
+      # Только loopback хоста. Для доступа с других машин поставьте перед сервером
+      # reverse proxy с TLS и добавьте его имя через --allowed-host.
+      - "127.0.0.1:8769:8769"
+    volumes:
+      - ./tokens.toml:/etc/appgallery-connect-mcp/tokens.toml:ro
+    secrets:
+      - agc-client-secret
+    environment:
+      RUST_LOG: warn
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    restart: unless-stopped
+
+secrets:
+  agc-client-secret:
+    file: ./secrets/agc-client-secret

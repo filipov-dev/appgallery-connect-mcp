@@ -4,6 +4,10 @@ expression: "snapshot_view(op(\"submit_app\"))"
 ---
 {
   "access": "destructive",
+  "auth_modes": [
+    "api-client",
+    "oauth-client"
+  ],
   "body": "Json",
   "description": "The app information must be complete and the package uploaded and parsed (about two minutes after the upload). Without releaseTime the version is released right after approval. With releaseType 3 the version is released by phase: the body must then carry the phased release start and end time, percentage and description, and the app must already have a released version. Submission starts the review and cannot be undone through the API.\n\nDestructive: sends the version for review; after approval it is released to AppGallery users.",
   "group": "publishing",

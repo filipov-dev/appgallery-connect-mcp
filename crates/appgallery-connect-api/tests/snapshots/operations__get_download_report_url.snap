@@ -4,6 +4,11 @@ expression: "snapshot_view(op(\"get_download_report_url\"))"
 ---
 {
   "access": "read",
+  "auth_modes": [
+    "api-client",
+    "oauth-client",
+    "service-account"
+  ],
   "body": null,
   "description": "The period between startTime and endTime (YYYYMMDD, UTC) is up to 180 days. Data can be filtered and grouped by date, country or region, business type and app version. The link is temporary: download the file right away.",
   "group": "reports",

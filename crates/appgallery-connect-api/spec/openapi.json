@@ -2,7 +2,7 @@
   "openapi": "3.0.3",
   "info": {
     "title": "AppGallery Connect API",
-    "version": "2026-11-14",
+    "version": "2026-11-18",
     "description": "Hand-maintained snapshot of the Huawei AppGallery Connect API, compiled from the pages of the official reference. Huawei does not publish a machine-readable specification. Requests are authorized with the client_id and Authorization headers of an API client; these headers are not listed as operation parameters."
   },
   "servers": [
@@ -51,6 +51,31 @@
       "name": "provisioning",
       "x-agc-title": "Provisioning API",
       "description": "HarmonyOS signing certificates, devices and provisioning profiles."
+    },
+    {
+      "name": "remoteconfig",
+      "x-agc-title": "Remote Configuration",
+      "description": "Parameters, conditions and versions of the Remote Configuration of an app (project-level API client)."
+    },
+    {
+      "name": "applinking",
+      "x-agc-title": "App Linking",
+      "description": "Short links of cross-platform links and unified download links of a project."
+    },
+    {
+      "name": "orders",
+      "x-agc-title": "IAP Order Service",
+      "description": "Server-side checks of consumables and non-consumables, refunds and orders (HMS In-App Purchases)."
+    },
+    {
+      "name": "subscriptions",
+      "x-agc-title": "IAP Subscription Service",
+      "description": "Server-side checks and management of auto-renewable subscriptions (HMS In-App Purchases)."
+    },
+    {
+      "name": "iapkit",
+      "x-agc-title": "HarmonyOS IAP Kit server API",
+      "description": "Server-side order and subscription queries, delivery acknowledgements and refund reviews of IAP Kit (apps on HarmonyOS 5 and later). Not callable through this server."
     }
   ],
   "paths": {
@@ -4828,7 +4853,7 @@
           "provisioning"
         ],
         "summary": "Requests a signing certificate (debug, release, in-house release or binary) from a certificate signing request.",
-        "description": "Requests a signing certificate (debug, release, in-house release or binary) from a certificate signing request. The response has the certificate ID and a download link that is valid for about five minutes.",
+        "description": "Requests a signing certificate (debug, release, in-house release or binary) from a certificate signing request. The csr field takes the PEM text of the CSR (up to 2048 characters). The response has the certificate ID and a download link that is valid for about five minutes.",
         "requestBody": {
           "required": true,
           "content": {
@@ -4920,7 +4945,7 @@
                       "type": "string",
                       "maxLength": 32
                     },
-                    "description": "Certificate ID list. Array length: 1–100"
+                    "description": "Certificate ID list. Array length: 1\u2013100"
                   }
                 }
               }
@@ -4993,7 +5018,7 @@
                       "type": "string",
                       "maxLength": 32
                     },
-                    "description": "Certificate ID list. Array length: 1–100"
+                    "description": "Certificate ID list. Array length: 1\u2013100"
                   }
                 },
                 "required": [
@@ -5206,7 +5231,7 @@
           "provisioning"
         ],
         "summary": "Deletes registered devices.",
-        "description": "Deletes registered devices. Up to 1000 device IDs per call. Deleting cannot be undone.",
+        "description": "Deletes registered devices. Up to 1000 device IDs per call. Devices in use cannot be deleted (result code 204144769). Deleting cannot be undone.",
         "requestBody": {
           "required": true,
           "content": {
@@ -5523,7 +5548,7 @@
           "provisioning"
         ],
         "summary": "Deletes a provisioning profile.",
-        "description": "Deletes a provisioning profile. The profile is addressed by the id query parameter. Deleting cannot be undone.",
+        "description": "Deletes a provisioning profile. The profile is addressed by the id query parameter. Deleting cannot be undone: builds can no longer be signed with the profile, so signing configurations that use it need a new profile.",
         "parameters": [
           {
             "name": "id",
@@ -5565,6 +5590,1690 @@
           "service-account"
         ],
         "x-agc-reference": "https://developer.huawei.com/consumer/en/doc/app/agc-help-provision-api-delete-provision-0000002236201310"
+      }
+    },
+    "/api/remote-config/v1/config": {
+      "get": {
+        "operationId": "remoteconfig.config.get",
+        "tags": [
+          "remoteconfig"
+        ],
+        "summary": "Returns the Remote Configuration of an app: parameters, their default and conditional values, and conditions.",
+        "description": "Returns the Remote Configuration of an app: parameters, their default and conditional values, and conditions. Without version the latest version is returned; with version, that earlier version. The response has versionInfo (version number and update time), configItems (parameters) and filters (conditions). Rate limit: 5 requests per second and 1000 per hour per IP address.",
+        "parameters": [
+          {
+            "name": "version",
+            "in": "query",
+            "required": false,
+            "description": "Version to return. Default: the latest version.",
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          },
+          {
+            "name": "productId",
+            "in": "header",
+            "required": true,
+            "description": "Project ID. The request is signed with the project-level API client of this project.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "appId",
+            "in": "header",
+            "required": true,
+            "description": "App ID of an app in the project.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Result envelope and data.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ret": {
+                      "$ref": "#/components/schemas/Ret"
+                    },
+                    "versionInfo": {
+                      "$ref": "#/components/schemas/ConfigVersion",
+                      "description": "Version of the returned configuration."
+                    },
+                    "configItems": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/ConfigItem"
+                      },
+                      "description": "Parameters of the configuration."
+                    },
+                    "filters": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Filter"
+                      },
+                      "description": "Conditions of the configuration."
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-agc-group": "remoteconfig",
+        "x-agc-result": {
+          "field": "ret",
+          "codeField": "code",
+          "messageField": "msg"
+        },
+        "x-agc-auth-modes": [
+          "api-client",
+          "service-account"
+        ],
+        "x-agc-reference": "https://developer.huawei.com/consumer/en/doc/development/AppGallery-connect-References/server-rest-config-0000001182298101"
+      },
+      "put": {
+        "operationId": "remoteconfig.config.update",
+        "tags": [
+          "remoteconfig"
+        ],
+        "summary": "Writes a new version of the Remote Configuration of an app: all parameters and conditions.",
+        "description": "Writes a new version of the Remote Configuration of an app: all parameters and conditions. The new version takes effect for the users of the app at once: there is no draft and no review. The body describes the whole configuration (configItems and filters as returned by the read operation, with the changes applied); a parameter or condition missing from the body is most likely deleted. version must be the latest version number (0 when the app has no configuration yet): if the configuration was changed after it was read, the request fails with result code 204083201 and nothing is written. The response has the new version number. Rate limit: 5 requests per second and 1000 per hour per IP address.",
+        "parameters": [
+          {
+            "name": "productId",
+            "in": "header",
+            "required": true,
+            "description": "Project ID. The request is signed with the project-level API client of this project.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "appId",
+            "in": "header",
+            "required": true,
+            "description": "App ID of an app in the project.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "appName": {
+                    "type": "string",
+                    "maxLength": 128,
+                    "description": "App name in the project."
+                  },
+                  "version": {
+                    "type": "integer",
+                    "format": "int64",
+                    "description": "Latest version number of the configuration as read; 0 for the first version."
+                  },
+                  "configItems": {
+                    "type": "array",
+                    "items": {
+                      "$ref": "#/components/schemas/ConfigItem"
+                    },
+                    "description": "Parameters of the configuration."
+                  },
+                  "filters": {
+                    "type": "array",
+                    "items": {
+                      "$ref": "#/components/schemas/Filter"
+                    },
+                    "description": "Conditions of the configuration. Which conditions apply depends on the platform of the app (Android, iOS, Web, HarmonyOS)."
+                  }
+                },
+                "required": [
+                  "version"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Result envelope and data.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ret": {
+                      "$ref": "#/components/schemas/Ret"
+                    },
+                    "version": {
+                      "type": "integer",
+                      "format": "int64",
+                      "description": "New latest version number."
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-agc-group": "remoteconfig",
+        "x-agc-result": {
+          "field": "ret",
+          "codeField": "code",
+          "messageField": "msg"
+        },
+        "x-agc-auth-modes": [
+          "api-client",
+          "service-account"
+        ],
+        "x-agc-reference": "https://developer.huawei.com/consumer/en/doc/development/AppGallery-connect-References/server-rest-modify-0000001182418015"
+      }
+    },
+    "/api/remote-config/v1/config/versions": {
+      "get": {
+        "operationId": "remoteconfig.version.list",
+        "tags": [
+          "remoteconfig"
+        ],
+        "summary": "Lists the versions of the Remote Configuration of an app: version number and update time.",
+        "description": "Lists the versions of the Remote Configuration of an app: version number and update time. Paged with fromPage (from 1) and pageSize (default 20); startTime and endTime narrow the period. The configuration of a version is read with the read operation and version. Rate limit: 5 requests per second and 1000 per hour per IP address.",
+        "parameters": [
+          {
+            "name": "startTime",
+            "in": "query",
+            "required": false,
+            "description": "Start of the period, in milliseconds since 1970-01-01 00:00:00 UTC.",
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          },
+          {
+            "name": "endTime",
+            "in": "query",
+            "required": false,
+            "description": "End of the period, in milliseconds since 1970-01-01 00:00:00 UTC.",
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          },
+          {
+            "name": "fromPage",
+            "in": "query",
+            "required": false,
+            "description": "Page number. Default value: 1",
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "pageSize",
+            "in": "query",
+            "required": false,
+            "description": "Page size. Default value: 20",
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "productId",
+            "in": "header",
+            "required": true,
+            "description": "Project ID. The request is signed with the project-level API client of this project.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "appId",
+            "in": "header",
+            "required": true,
+            "description": "App ID of an app in the project.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Result envelope and data.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ret": {
+                      "$ref": "#/components/schemas/Ret"
+                    },
+                    "versionInfos": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/ConfigVersion"
+                      },
+                      "description": "Versions of the configuration."
+                    },
+                    "total": {
+                      "type": "integer",
+                      "description": "Total number of versions."
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-agc-group": "remoteconfig",
+        "x-agc-result": {
+          "field": "ret",
+          "codeField": "code",
+          "messageField": "msg"
+        },
+        "x-agc-auth-modes": [
+          "api-client",
+          "service-account"
+        ],
+        "x-agc-reference": "https://developer.huawei.com/consumer/en/doc/development/AppGallery-connect-References/server-rest-versions-0000001136178514"
+      }
+    },
+    "/api/remote-config/v1/config/rollback": {
+      "post": {
+        "operationId": "remoteconfig.config.rollback",
+        "tags": [
+          "remoteconfig"
+        ],
+        "summary": "Rolls the Remote Configuration of an app back to an earlier version.",
+        "description": "Rolls the Remote Configuration of an app back to an earlier version. The rollback creates a new latest version with the configuration of the given version; it takes effect for the users of the app at once. Up to 300 versions of the last 90 days can be rolled back to. The response has the new version number. Rate limit: 5 requests per second and 1000 per hour per IP address.",
+        "parameters": [
+          {
+            "name": "productId",
+            "in": "header",
+            "required": true,
+            "description": "Project ID. The request is signed with the project-level API client of this project.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "appId",
+            "in": "header",
+            "required": true,
+            "description": "App ID of an app in the project.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "version": {
+                    "type": "integer",
+                    "format": "int64",
+                    "description": "Version to roll back to."
+                  }
+                },
+                "required": [
+                  "version"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Result envelope and data.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ret": {
+                      "$ref": "#/components/schemas/Ret"
+                    },
+                    "version": {
+                      "type": "integer",
+                      "format": "int64",
+                      "description": "New latest version number."
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-agc-group": "remoteconfig",
+        "x-agc-result": {
+          "field": "ret",
+          "codeField": "code",
+          "messageField": "msg"
+        },
+        "x-agc-auth-modes": [
+          "api-client",
+          "service-account"
+        ],
+        "x-agc-reference": "https://developer.huawei.com/consumer/en/doc/development/AppGallery-connect-References/server-rest-rollback-0000001136018714"
+      }
+    },
+    "/api/applinking/v1/links": {
+      "post": {
+        "operationId": "applinking.link.create",
+        "tags": [
+          "applinking"
+        ],
+        "summary": "Creates a short link of an App Linking cross-platform link.",
+        "description": "Creates a short link of an App Linking cross-platform link. The link is made from a long link (`longUrl`) or from link details (`linkInfo`; it wins when both are passed). The URL prefix (`uriPrefix`, like `https://example.drcn.agconnect.link`) must be requested in AppGallery Connect > the project > App Linking beforehand. The link is public: anyone who gets it can open it until it expires (two years by default, `expireTime`). Links created through the API are not shown in AppGallery Connect, and the API cannot list, change or delete them: check the details before creating a link that will be sent to users. Up to 100,000 short links per project per day.",
+        "parameters": [
+          {
+            "name": "productId",
+            "in": "header",
+            "required": true,
+            "description": "Project ID (AppGallery Connect > My projects > the project > Project settings). The server signs the request with the project-level API client of this project.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "longUrl": {
+                    "type": "string",
+                    "description": "Long link of a cross-platform link to shorten (see Manually Creating a Cross-Platform Link in the App Linking guide); query parameters must be URL-encoded. Pass either longUrl or linkInfo."
+                  },
+                  "linkInfo": {
+                    "$ref": "#/components/schemas/AppLinkingLinkInfo",
+                    "description": "Details of the cross-platform link. Pass either longUrl or linkInfo; linkInfo wins when both are passed."
+                  },
+                  "suffixLength": {
+                    "type": "string",
+                    "description": "Length of the short link suffix: SHORT (four or more characters, default) or LONG (17 characters)."
+                  },
+                  "expireTime": {
+                    "type": "integer",
+                    "format": "int64",
+                    "description": "Validity period of the short link in seconds, an integer greater than 300. Default: two years."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Result envelope and the created link.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ret": {
+                      "$ref": "#/components/schemas/Ret"
+                    },
+                    "shortUrl": {
+                      "type": "string",
+                      "description": "The created short link."
+                    },
+                    "testUrl": {
+                      "type": "string",
+                      "description": "Test URL that shows the preview of the link."
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-agc-group": "applinking",
+        "x-agc-result": {
+          "field": "ret",
+          "codeField": "code",
+          "messageField": "msg"
+        },
+        "x-agc-auth-modes": [
+          "api-client",
+          "service-account"
+        ],
+        "x-agc-reference": "https://developer.huawei.com/consumer/en/doc/development/AppGallery-connect-References/applinking-create-0000001141716380"
+      }
+    },
+    "/api/applinking/v1/unified-links": {
+      "post": {
+        "operationId": "applinking.unifiedLink.create",
+        "tags": [
+          "applinking"
+        ],
+        "summary": "Creates an App Linking unified download link.",
+        "description": "Creates an App Linking unified download link. It is one link that opens the app page in the store of the user's device (App Store on iOS, AppGallery on Android devices with AppGallery, another store such as Google Play otherwise) and the default link elsewhere. The URL prefix (`uriPrefix`) must be requested in AppGallery Connect > the project > App Linking beforehand. The link is public. Links created through the API are not shown in AppGallery Connect, and the API cannot list, change or delete them; a project can have up to 2000 unified download links, so do not create links just to try.",
+        "parameters": [
+          {
+            "name": "productId",
+            "in": "header",
+            "required": true,
+            "description": "Project ID (AppGallery Connect > My projects > the project > Project settings). The server signs the request with the project-level API client of this project.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "uriPrefix": {
+                    "type": "string",
+                    "description": "URL prefix of the link, like https://example.drcn.agconnect.link, requested in AppGallery Connect beforehand."
+                  },
+                  "name": {
+                    "type": "string",
+                    "description": "Custom name of the unified download link."
+                  },
+                  "defaultRedirectionUrl": {
+                    "type": "string",
+                    "description": "Default redirection link: for users not on a mobile device and when no iOS or Android link is set."
+                  },
+                  "iosRedirectionUrl": {
+                    "type": "string",
+                    "description": "Link for iOS users, like https://apps.apple.com/app/id<ID>."
+                  },
+                  "agRedirectionUrl": {
+                    "type": "string",
+                    "description": "Link to the app page on AppGallery for Android users, like hiapplink://com.huawei.appmarket?appId=<app ID>."
+                  },
+                  "otherRedirectionUrl": {
+                    "type": "string",
+                    "description": "Link for Android users when AppGallery is unavailable or fails to open, like https://play.google.com/store/apps/details?id=<package>."
+                  },
+                  "campaign": {
+                    "$ref": "#/components/schemas/AppLinkingCampaign",
+                    "description": "Campaign tracing parameters added to the link: channel, medium and campaign name."
+                  }
+                },
+                "required": [
+                  "uriPrefix",
+                  "name",
+                  "defaultRedirectionUrl"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Result envelope and the created link.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ret": {
+                      "$ref": "#/components/schemas/Ret"
+                    },
+                    "shortUrl": {
+                      "type": "string",
+                      "description": "The created unified download link."
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-agc-group": "applinking",
+        "x-agc-result": {
+          "field": "ret",
+          "codeField": "code",
+          "messageField": "msg"
+        },
+        "x-agc-auth-modes": [
+          "api-client",
+          "service-account"
+        ],
+        "x-agc-reference": "https://developer.huawei.com/consumer/en/doc/development/AppGallery-connect-References/applinking-create-unifiedlinking-0000001186476535"
+      }
+    },
+    "/applications/purchases/tokens/verify": {
+      "post": {
+        "operationId": "orders.purchaseToken.verify",
+        "tags": [
+          "orders"
+        ],
+        "summary": "Verifies the purchase token of a consumable or non-consumable and returns its purchase data.",
+        "description": "Verifies the purchase token of a consumable or non-consumable and returns its purchase data. Only the latest purchase token of a product can be verified: after a consumable is confirmed and bought again, the earlier token returns result code 12. Check that productId, price and currency of the purchase data match the order before delivering the product. For subscriptions use the subscription query (`get_subscription_purchase`).",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IapPurchaseRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Result code and data.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "responseCode": {
+                      "type": "string",
+                      "description": "Result code; \"0\" means success."
+                    },
+                    "responseMessage": {
+                      "type": "string",
+                      "description": "Result description."
+                    },
+                    "purchaseTokenData": {
+                      "type": "string",
+                      "description": "Purchase data of the product as a JSON string (InappPurchaseDetails).",
+                      "x-agc-json": {
+                        "$ref": "#/components/schemas/InappPurchaseDetails"
+                      }
+                    },
+                    "dataSignature": {
+                      "type": "string",
+                      "description": "Signature of purchaseTokenData made with the IAP private key of the app."
+                    },
+                    "signatureAlgorithm": {
+                      "type": "string",
+                      "description": "Signature algorithm, for example SHA256WithRSA or SHA256WithRSA/PSS."
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-agc-group": "orders",
+        "x-agc-result": {
+          "field": "",
+          "codeField": "responseCode",
+          "messageField": "responseMessage"
+        },
+        "x-agc-reference": "https://developer.huawei.com/consumer/en/doc/development/HMSCore-References/api-order-verify-purchase-token-0000001050746113",
+        "x-agc-service": "iap-orders"
+      }
+    },
+    "/applications/v2/purchases/confirm": {
+      "post": {
+        "operationId": "orders.purchase.confirm",
+        "tags": [
+          "orders"
+        ],
+        "summary": "Confirms that a purchased consumable was delivered, so that the user can buy it again.",
+        "description": "Confirms that a purchased consumable was delivered, so that the user can buy it again. Call it only after the product is delivered: without the confirmation the consumable cannot be bought again. It does the same as consumeOwnedPurchase of the IAP client, but the client cache is not refreshed, so obtainOwnedPurchases on the device can still return the purchase. Result code 9 means the purchase is already confirmed.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IapPurchaseRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Result code and data.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "responseCode": {
+                      "type": "string",
+                      "description": "Result code; \"0\" means success."
+                    },
+                    "responseMessage": {
+                      "type": "string",
+                      "description": "Result description."
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-agc-group": "orders",
+        "x-agc-result": {
+          "field": "",
+          "codeField": "responseCode",
+          "messageField": "responseMessage"
+        },
+        "x-agc-reference": "https://developer.huawei.com/consumer/en/doc/development/HMSCore-References/api-purchase-confirm-for-order-service-0000001051066054",
+        "x-agc-service": "iap-orders"
+      }
+    },
+    "/applications/v2/purchases/cancelledList": {
+      "post": {
+        "operationId": "orders.cancelledPurchase.list",
+        "tags": [
+          "orders"
+        ],
+        "summary": "Lists purchases canceled or refunded in the last 30 days.",
+        "description": "Lists purchases canceled or refunded in the last 30 days. type 0 returns consumables and non-consumables, type 1 also subscriptions. startAt and endAt are UTC timestamps in milliseconds within the last 30 days (by default the whole 30 days). A page has at most maxRows records (1000 by default and at most). When the response has continuationToken, pass it in the body of the next call to get the next page: startAt, endAt and type are ignored then. The records carry no signature.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IapCancelledListRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Result code and data.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "responseCode": {
+                      "type": "string",
+                      "description": "Result code; \"0\" means success."
+                    },
+                    "responseMessage": {
+                      "type": "string",
+                      "description": "Result description."
+                    },
+                    "cancelledPurchaseList": {
+                      "type": "string",
+                      "description": "Canceled or refunded purchases as a JSON string (an array of CancelledPurchase).",
+                      "x-agc-json": {
+                        "type": "array",
+                        "items": {
+                          "$ref": "#/components/schemas/CancelledPurchase"
+                        }
+                      }
+                    },
+                    "continuationToken": {
+                      "type": "string",
+                      "description": "Token of the next page; pass it in the next request. Missing on the last page."
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-agc-group": "orders",
+        "x-agc-result": {
+          "field": "",
+          "codeField": "responseCode",
+          "messageField": "responseMessage"
+        },
+        "x-agc-reference": "https://developer.huawei.com/consumer/en/doc/development/HMSCore-References/api-cancel-or-refund-record-0000001050746117",
+        "x-agc-service": "iap-orders"
+      }
+    },
+    "/applications/v1/merchantQuery": {
+      "post": {
+        "operationId": "orders.merchantOrder.list",
+        "tags": [
+          "orders"
+        ],
+        "summary": "Lists payment and refund orders paid within a period of at most 48 hours.",
+        "description": "Lists payment and refund orders paid within a period of at most 48 hours. startAt and endAt are UTC timestamps in milliseconds; endAt is later than startAt by at most 48 hours, and only orders whose payment time (tradeTime) falls in the period are returned. Orders of the current day can still change: query the previous day. When the response has continuationToken, pass it in the body of the next call to get the next page.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IapOrderQueryRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Result code and data.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "responseCode": {
+                      "type": "string",
+                      "description": "Result code; \"0\" means success."
+                    },
+                    "responseMessage": {
+                      "type": "string",
+                      "description": "Result description."
+                    },
+                    "orderInfoList": {
+                      "type": "array",
+                      "description": "Orders.",
+                      "items": {
+                        "$ref": "#/components/schemas/OrderInfo"
+                      }
+                    },
+                    "continuationToken": {
+                      "type": "string",
+                      "description": "Token of the next page; pass it in the next request. Missing on the last page."
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-agc-group": "orders",
+        "x-agc-result": {
+          "field": "",
+          "codeField": "responseCode",
+          "messageField": "responseMessage"
+        },
+        "x-agc-reference": "https://developer.huawei.com/consumer/en/doc/development/HMSCore-References/api-application-query-orderinfo-0000001431190629",
+        "x-agc-service": "iap-orders"
+      }
+    },
+    "/sub/applications/v2/purchases/get": {
+      "post": {
+        "operationId": "subscriptions.purchase.get",
+        "tags": [
+          "subscriptions"
+        ],
+        "summary": "Returns the latest purchase data of a subscription, including whether it is valid now.",
+        "description": "Returns the latest purchase data of a subscription, including whether it is valid now. For subscriptions only; for consumables and non-consumables use `verify_product_purchase`. In the purchase data subIsvalid tells whether the user has access now and expirationDate when the current period ends.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IapSubscriptionRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Result code and data.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "responseCode": {
+                      "type": "string",
+                      "description": "Result code; \"0\" means success."
+                    },
+                    "responseMessage": {
+                      "type": "string",
+                      "description": "Result description."
+                    },
+                    "inappPurchaseData": {
+                      "type": "string",
+                      "description": "Purchase data of the subscription as a JSON string (InappPurchaseDetails).",
+                      "x-agc-json": {
+                        "$ref": "#/components/schemas/InappPurchaseDetails"
+                      }
+                    },
+                    "dataSignature": {
+                      "type": "string",
+                      "description": "Signature of inappPurchaseData made with the IAP private key of the app."
+                    },
+                    "signatureAlgorithm": {
+                      "type": "string",
+                      "description": "Signature algorithm, for example SHA256WithRSA or SHA256WithRSA/PSS."
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-agc-group": "subscriptions",
+        "x-agc-result": {
+          "field": "",
+          "codeField": "responseCode",
+          "messageField": "responseMessage"
+        },
+        "x-agc-reference": "https://developer.huawei.com/consumer/en/doc/development/HMSCore-References/api-subscription-verify-purchase-token-0000001050706080",
+        "x-agc-service": "iap-subscriptions"
+      }
+    },
+    "/sub/applications/v2/purchases/stop": {
+      "post": {
+        "operationId": "subscriptions.purchase.stop",
+        "tags": [
+          "subscriptions"
+        ],
+        "summary": "Cancels a subscription: it stays valid until the end of the paid period but is not renewed.",
+        "description": "Cancels a subscription: it stays valid until the end of the paid period but is not renewed. Payments already made are not refunded.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IapSubscriptionRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Result code and data.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "responseCode": {
+                      "type": "string",
+                      "description": "Result code; \"0\" means success."
+                    },
+                    "responseMessage": {
+                      "type": "string",
+                      "description": "Result description."
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-agc-group": "subscriptions",
+        "x-agc-result": {
+          "field": "",
+          "codeField": "responseCode",
+          "messageField": "responseMessage"
+        },
+        "x-agc-reference": "https://developer.huawei.com/consumer/en/doc/development/HMSCore-References/api-cancel-subscription-0000001050746115",
+        "x-agc-service": "iap-subscriptions"
+      }
+    },
+    "/sub/applications/v2/purchases/delay": {
+      "post": {
+        "operationId": "subscriptions.purchase.delay",
+        "tags": [
+          "subscriptions"
+        ],
+        "summary": "Defers the next billing date of a subscription.",
+        "description": "Defers the next billing date of a subscription. desiredExpirationTime must be later than currentExpirationTime (the end of the current period) by 1 to 365 days. The user keeps access and is not charged during the deferral. The billing date can be deferred again before the new date comes.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IapSubscriptionDelayRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Result code and data.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "responseCode": {
+                      "type": "string",
+                      "description": "Result code; \"0\" means success."
+                    },
+                    "responseMessage": {
+                      "type": "string",
+                      "description": "Result description."
+                    },
+                    "newExpirationTime": {
+                      "type": "integer",
+                      "format": "int64",
+                      "description": "End of the subscription period after the deferral, UTC timestamp in milliseconds."
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-agc-group": "subscriptions",
+        "x-agc-result": {
+          "field": "",
+          "codeField": "responseCode",
+          "messageField": "responseMessage"
+        },
+        "x-agc-reference": "https://developer.huawei.com/consumer/en/doc/development/HMSCore-References/api-delayed-settlement-0000001050706082",
+        "x-agc-service": "iap-subscriptions"
+      }
+    },
+    "/sub/applications/v2/purchases/returnFee": {
+      "post": {
+        "operationId": "subscriptions.purchase.returnFee",
+        "tags": [
+          "subscriptions"
+        ],
+        "summary": "Refunds the latest payment of a subscription without canceling it.",
+        "description": "Refunds the latest payment of a subscription without canceling it. Only the most recent payment is refunded, and only once; the subscription stays valid and keeps renewing. In the sandbox and for products priced 0 the refund completes at once. Other payments are refunded only through Huawei support.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IapSubscriptionRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Result code and data.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "responseCode": {
+                      "type": "string",
+                      "description": "Result code; \"0\" means success."
+                    },
+                    "responseMessage": {
+                      "type": "string",
+                      "description": "Result description."
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-agc-group": "subscriptions",
+        "x-agc-result": {
+          "field": "",
+          "codeField": "responseCode",
+          "messageField": "responseMessage"
+        },
+        "x-agc-reference": "https://developer.huawei.com/consumer/en/doc/development/HMSCore-References/api-refund-subscription-fee-0000001050986131",
+        "x-agc-service": "iap-subscriptions"
+      }
+    },
+    "/sub/applications/v2/purchases/withdrawal": {
+      "post": {
+        "operationId": "subscriptions.purchase.withdraw",
+        "tags": [
+          "subscriptions"
+        ],
+        "summary": "Revokes a subscription at once and refunds its latest payment.",
+        "description": "Revokes a subscription at once and refunds its latest payment. The user loses access immediately and the subscription is not renewed. The refund can take some time to reach the user. Huawei suggests it for suspected fraud.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IapSubscriptionRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Result code and data.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "responseCode": {
+                      "type": "string",
+                      "description": "Result code; \"0\" means success."
+                    },
+                    "responseMessage": {
+                      "type": "string",
+                      "description": "Result description."
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-agc-group": "subscriptions",
+        "x-agc-result": {
+          "field": "",
+          "codeField": "responseCode",
+          "messageField": "responseMessage"
+        },
+        "x-agc-reference": "https://developer.huawei.com/consumer/en/doc/development/HMSCore-References/api-unsubscribe-0000001051066056",
+        "x-agc-service": "iap-subscriptions"
+      }
+    },
+    "/order/harmony/v1/application/order/status/query": {
+      "post": {
+        "operationId": "iapkit.orderStatus.query",
+        "tags": [
+          "iapkit"
+        ],
+        "summary": "Queries the latest status of a consumable, non-consumable or non-renewable subscription order.",
+        "description": "Queries the latest status of a consumable, non-consumable or non-renewable subscription order. HarmonyOS 5 and later (IAP Kit). Called after a key event notification, before the product is delivered.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IapKitPurchaseRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Result code and data.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "responseCode": {
+                      "type": "string",
+                      "description": "Result code; \"0\" means success."
+                    },
+                    "responseMessage": {
+                      "type": "string",
+                      "description": "Result description."
+                    },
+                    "jwsPurchaseOrder": {
+                      "type": "string",
+                      "description": "Order status in JWS format (ES256, certificate chain in the x5c header); the payload is PurchaseOrderPayload. Verify the signature with the Huawei CBG Root CA G2 certificate before trusting it."
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-agc-group": "iapkit",
+        "x-agc-result": {
+          "field": "",
+          "codeField": "responseCode",
+          "messageField": "responseMessage"
+        },
+        "x-agc-reference": "https://developer.huawei.com/consumer/en/doc/harmonyos-references/iap-query-order-status",
+        "x-agc-service": "iap-kit"
+      }
+    },
+    "/order/harmony/v1/application/purchase/shipped/confirm": {
+      "post": {
+        "operationId": "iapkit.orderDelivery.confirm",
+        "tags": [
+          "iapkit"
+        ],
+        "summary": "Acknowledges that a consumable, non-consumable or non-renewable subscription was delivered.",
+        "description": "Acknowledges that a consumable, non-consumable or non-renewable subscription was delivered. HarmonyOS 5 and later (IAP Kit). Each purchaseOrderId can be acknowledged only once.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IapKitPurchaseRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Result code and data.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "responseCode": {
+                      "type": "string",
+                      "description": "Result code; \"0\" means success."
+                    },
+                    "responseMessage": {
+                      "type": "string",
+                      "description": "Result description."
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-agc-group": "iapkit",
+        "x-agc-result": {
+          "field": "",
+          "codeField": "responseCode",
+          "messageField": "responseMessage"
+        },
+        "x-agc-reference": "https://developer.huawei.com/consumer/en/doc/harmonyos-references/iap-confirm-purchase-for-order",
+        "x-agc-service": "iap-kit"
+      }
+    },
+    "/order/harmony/v1/application/trade/orders/query": {
+      "post": {
+        "operationId": "iapkit.tradeOrders.query",
+        "tags": [
+          "iapkit"
+        ],
+        "summary": "Queries payment and refund orders within a time range of at most 48 hours.",
+        "description": "Queries payment and refund orders within a time range of at most 48 hours. HarmonyOS 5 and later (IAP Kit). Only the last 180 days; sandbox and zero-amount orders are not returned. Query the previous day rather than the current one: orders of the current day can still change.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IapKitTradeOrdersRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Result code and data.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "responseCode": {
+                      "type": "string",
+                      "description": "Result code; \"0\" means success."
+                    },
+                    "responseMessage": {
+                      "type": "string",
+                      "description": "Result description."
+                    },
+                    "orderInfoList": {
+                      "type": "array",
+                      "items": {
+                        "type": "object"
+                      },
+                      "description": "Orders (OrderInfo)."
+                    },
+                    "continuationToken": {
+                      "type": "string",
+                      "description": "Pagination flag: pass the continuationToken of the previous response to get the next page."
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-agc-group": "iapkit",
+        "x-agc-result": {
+          "field": "",
+          "codeField": "responseCode",
+          "messageField": "responseMessage"
+        },
+        "x-agc-reference": "https://developer.huawei.com/consumer/en/doc/harmonyos-references/iap-order-query",
+        "x-agc-service": "iap-kit"
+      }
+    },
+    "/subscription/harmony/v1/application/subscription/status/query": {
+      "post": {
+        "operationId": "iapkit.subscriptionStatus.query",
+        "tags": [
+          "iapkit"
+        ],
+        "summary": "Queries the latest status of an auto-renewable subscription.",
+        "description": "Queries the latest status of an auto-renewable subscription. HarmonyOS 5 and later (IAP Kit). Called after a key event notification, before the subscription is delivered.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IapKitPurchaseRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Result code and data.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "responseCode": {
+                      "type": "string",
+                      "description": "Result code; \"0\" means success."
+                    },
+                    "responseMessage": {
+                      "type": "string",
+                      "description": "Result description."
+                    },
+                    "jwsSubGroupStatus": {
+                      "type": "string",
+                      "description": "Subscription group status in JWS format (ES256, certificate chain in the x5c header); the payload is SubGroupStatusPayload. Verify the signature with the Huawei CBG Root CA G2 certificate before trusting it."
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-agc-group": "iapkit",
+        "x-agc-result": {
+          "field": "",
+          "codeField": "responseCode",
+          "messageField": "responseMessage"
+        },
+        "x-agc-reference": "https://developer.huawei.com/consumer/en/doc/harmonyos-references/iap-query-subscription-status",
+        "x-agc-service": "iap-kit"
+      }
+    },
+    "/subscription/harmony/v1/application/purchase/shipped/confirm": {
+      "post": {
+        "operationId": "iapkit.subscriptionDelivery.confirm",
+        "tags": [
+          "iapkit"
+        ],
+        "summary": "Acknowledges that a subscription was delivered.",
+        "description": "Acknowledges that a subscription was delivered. HarmonyOS 5 and later (IAP Kit). Each purchaseOrderId can be acknowledged only once.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IapKitPurchaseRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Result code and data.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "responseCode": {
+                      "type": "string",
+                      "description": "Result code; \"0\" means success."
+                    },
+                    "responseMessage": {
+                      "type": "string",
+                      "description": "Result description."
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-agc-group": "iapkit",
+        "x-agc-result": {
+          "field": "",
+          "codeField": "responseCode",
+          "messageField": "responseMessage"
+        },
+        "x-agc-reference": "https://developer.huawei.com/consumer/en/doc/harmonyos-references/iap-confirm-purchase-for-sub",
+        "x-agc-service": "iap-kit"
+      }
+    },
+    "/subscription/harmony/v1/application/subscription/renewal/modify": {
+      "post": {
+        "operationId": "iapkit.subscriptionRenewal.postpone",
+        "tags": [
+          "iapkit"
+        ],
+        "summary": "Postpones the next renewal date of an active auto-renewable subscription by 1 to 90 days.",
+        "description": "Postpones the next renewal date of an active auto-renewable subscription by 1 to 90 days. HarmonyOS 5 and later (IAP Kit). Not for expired subscriptions or free trials; at most two postponements per subscription in 365 days. The user is not charged for the extra days.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IapKitRenewalPostponeRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Result code and data.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "responseCode": {
+                      "type": "string",
+                      "description": "Result code; \"0\" means success."
+                    },
+                    "responseMessage": {
+                      "type": "string",
+                      "description": "Result description."
+                    },
+                    "newExpirationTime": {
+                      "type": "integer",
+                      "format": "int64",
+                      "description": "Expiration time of the subscription period after the postponement, UTC timestamp in milliseconds."
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-agc-group": "iapkit",
+        "x-agc-result": {
+          "field": "",
+          "codeField": "responseCode",
+          "messageField": "responseMessage"
+        },
+        "x-agc-reference": "https://developer.huawei.com/consumer/en/doc/harmonyos-references/iap-date-delay-for-sub",
+        "x-agc-service": "iap-kit"
+      }
+    },
+    "/harmony/v1/application/order/lookup": {
+      "post": {
+        "operationId": "iapkit.order.lookup",
+        "tags": [
+          "iapkit"
+        ],
+        "summary": "Queries the order status by the order number that the user sees in the purchase history.",
+        "description": "Queries the order status by the order number that the user sees in the purchase history. HarmonyOS 5 and later (IAP Kit).",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IapKitOrderLookupRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Result code and data.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "responseCode": {
+                      "type": "string",
+                      "description": "Result code; \"0\" means success."
+                    },
+                    "responseMessage": {
+                      "type": "string",
+                      "description": "Result description."
+                    },
+                    "orderStatus": {
+                      "type": "integer",
+                      "format": "int32",
+                      "description": "Whether the order number is valid."
+                    },
+                    "jwsPurchaseOrder": {
+                      "type": "string",
+                      "description": "Order status in JWS format (ES256, certificate chain in the x5c header); the payload is PurchaseOrderPayload. Verify the signature with the Huawei CBG Root CA G2 certificate before trusting it."
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-agc-group": "iapkit",
+        "x-agc-result": {
+          "field": "",
+          "codeField": "responseCode",
+          "messageField": "responseMessage"
+        },
+        "x-agc-reference": "https://developer.huawei.com/consumer/en/doc/harmonyos-references/iap-order-info-query-by-transaction-number",
+        "x-agc-service": "iap-kit"
+      }
+    },
+    "/harmony/v1/application/user/orders/query": {
+      "post": {
+        "operationId": "iapkit.userOrders.query",
+        "tags": [
+          "iapkit"
+        ],
+        "summary": "Queries the purchase history of the user who made a given purchase.",
+        "description": "Queries the purchase history of the user who made a given purchase. HarmonyOS 5 and later (IAP Kit). At most 10 purchase records per page.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IapKitUserOrdersRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Result code and data.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "responseCode": {
+                      "type": "string",
+                      "description": "Result code; \"0\" means success."
+                    },
+                    "responseMessage": {
+                      "type": "string",
+                      "description": "Result description."
+                    },
+                    "jwsPurchaseOrderList": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "description": "Order in JWS format (PurchaseOrderPayload)."
+                      },
+                      "description": "Orders in JWS format."
+                    },
+                    "continuationToken": {
+                      "type": "string",
+                      "description": "Pagination flag: pass the continuationToken of the previous response to get the next page."
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-agc-group": "iapkit",
+        "x-agc-result": {
+          "field": "",
+          "codeField": "responseCode",
+          "messageField": "responseMessage"
+        },
+        "x-agc-reference": "https://developer.huawei.com/consumer/en/doc/harmonyos-references/iap-order-info-query-by-order-history",
+        "x-agc-service": "iap-kit"
+      }
+    },
+    "/harmony/v1/application/notifications/query": {
+      "post": {
+        "operationId": "iapkit.notifications.query",
+        "tags": [
+          "iapkit"
+        ],
+        "summary": "Queries the records of server-side notifications sent to the app server.",
+        "description": "Queries the records of server-side notifications sent to the app server. HarmonyOS 5 and later (IAP Kit).",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IapKitNotificationsRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Result code and data.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "responseCode": {
+                      "type": "string",
+                      "description": "Result code; \"0\" means success."
+                    },
+                    "responseMessage": {
+                      "type": "string",
+                      "description": "Result description."
+                    },
+                    "notificationHistory": {
+                      "type": "array",
+                      "items": {
+                        "type": "object"
+                      },
+                      "description": "Notification records (NotificationHistory) with jwsNotification and sendResult."
+                    },
+                    "continuationToken": {
+                      "type": "string",
+                      "description": "Pagination flag: pass the continuationToken of the previous response to get the next page."
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-agc-group": "iapkit",
+        "x-agc-result": {
+          "field": "",
+          "codeField": "responseCode",
+          "messageField": "responseMessage"
+        },
+        "x-agc-reference": "https://developer.huawei.com/consumer/en/doc/harmonyos-references/iap-server-notifications-record-query",
+        "x-agc-service": "iap-kit"
+      }
+    },
+    "/harmony/v1/application/notifications/test": {
+      "post": {
+        "operationId": "iapkit.notifications.test",
+        "tags": [
+          "iapkit"
+        ],
+        "summary": "Sends a test server-side notification to the app server.",
+        "description": "Sends a test server-side notification to the app server. HarmonyOS 5 and later (IAP Kit).",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IapKitEmptyRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Result code and data.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "responseCode": {
+                      "type": "string",
+                      "description": "Result code; \"0\" means success."
+                    },
+                    "responseMessage": {
+                      "type": "string",
+                      "description": "Result description."
+                    },
+                    "testNotificationId": {
+                      "type": "string",
+                      "description": "Test notification ID."
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-agc-group": "iapkit",
+        "x-agc-result": {
+          "field": "",
+          "codeField": "responseCode",
+          "messageField": "responseMessage"
+        },
+        "x-agc-reference": "https://developer.huawei.com/consumer/en/doc/harmonyos-references/iap-server-notifications-test",
+        "x-agc-service": "iap-kit"
+      }
+    },
+    "/post-sales/harmony/v1/transactions/refund/result": {
+      "post": {
+        "operationId": "iapkit.refundResult.send",
+        "tags": [
+          "iapkit"
+        ],
+        "summary": "Returns the review result of a refund request to the IAP server.",
+        "description": "Returns the review result of a refund request to the IAP server. HarmonyOS 5 and later (IAP Kit). Approving a refund returns money to the user.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IapKitRefundResultRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Result code and data.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "returnCode": {
+                      "type": "string",
+                      "description": "Result code; \"0\" means success."
+                    },
+                    "returnDesc": {
+                      "type": "string",
+                      "description": "Result description."
+                    },
+                    "subErrCode": {
+                      "type": "string",
+                      "description": "Specific error reason when returnCode is not 0."
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-agc-group": "iapkit",
+        "x-agc-result": {
+          "field": "",
+          "codeField": "returnCode",
+          "messageField": "returnDesc"
+        },
+        "x-agc-reference": "https://developer.huawei.com/consumer/en/doc/harmonyos-references/iap-server-refund-return-result",
+        "x-agc-service": "iap-kit"
       }
     }
   },
@@ -5857,6 +7566,182 @@
           }
         }
       },
+      "AppLinkingAndroidInfo": {
+        "type": "object",
+        "properties": {
+          "deepLink": {
+            "type": "string",
+            "description": "Deep link of the Android app, used first to open the app on an Android device."
+          },
+          "packageName": {
+            "type": "string",
+            "description": "Package name of the Android app, as configured in AppGallery Connect."
+          },
+          "openType": {
+            "type": "integer",
+            "description": "What opens when the Android app is not installed: 1 the app page on AppGallery (packageName is required, do not pass fallbackUrl), 2 the app page in the local app store of the device, 3 a custom URL (fallbackUrl is required). Default: 1 with packageName only, 3 with packageName and fallbackUrl."
+          },
+          "fallbackUrl": {
+            "type": "string",
+            "description": "URL opened when the Android app is not installed (openType 3)."
+          }
+        }
+      },
+      "AppLinkingAppStoreCampaign": {
+        "type": "object",
+        "properties": {
+          "affiliateToken": {
+            "type": "string",
+            "description": "iTunes affiliate token (a public campaign parameter, not a credential)."
+          },
+          "providerToken": {
+            "type": "string",
+            "description": "Apple provider ID from App Store Connect App Analytics."
+          },
+          "campaignToken": {
+            "type": "string",
+            "description": "Campaign tracing parameter."
+          },
+          "mediaType": {
+            "type": "string",
+            "description": "Media type: 1 music, 2 podcasts, 3 audiobooks, 4 TV shows, 5 music videos, 6 movies, 7 iPod games, 8 mobile apps, 9 ringtones, 10 iTunes U, 11 e-books, 12 desktop apps."
+          }
+        }
+      },
+      "AppLinkingCampaign": {
+        "type": "object",
+        "properties": {
+          "channel": {
+            "type": "string",
+            "description": "Channel, like Huawei, or a custom value."
+          },
+          "medium": {
+            "type": "string",
+            "description": "Medium, like cpc or email."
+          },
+          "name": {
+            "type": "string",
+            "description": "Campaign name, like a New Year promotion."
+          }
+        }
+      },
+      "AppLinkingHarmonyOSInfo": {
+        "type": "object",
+        "properties": {
+          "deepLink": {
+            "type": "string",
+            "description": "Deep link of the HarmonyOS app, used first to open the app on a HarmonyOS device."
+          },
+          "packageName": {
+            "type": "string",
+            "description": "Package name of the HarmonyOS app, as configured in AppGallery Connect."
+          },
+          "fallbackUrl": {
+            "type": "string",
+            "description": "URL opened when the HarmonyOS app is not installed."
+          }
+        }
+      },
+      "AppLinkingIOSInfo": {
+        "type": "object",
+        "properties": {
+          "deepLink": {
+            "type": "string",
+            "description": "URL opened on an iOS device."
+          },
+          "bundleId": {
+            "type": "string",
+            "description": "Bundle ID of the iOS app, as configured in AppGallery Connect."
+          },
+          "fallbackUrl": {
+            "type": "string",
+            "description": "URL opened when the iOS app is not installed."
+          },
+          "ipad": {
+            "$ref": "#/components/schemas/AppLinkingIpadInfo",
+            "description": "iPad app."
+          },
+          "appStoreCampaign": {
+            "$ref": "#/components/schemas/AppLinkingAppStoreCampaign",
+            "description": "App Store Connect campaign parameters."
+          }
+        }
+      },
+      "AppLinkingIpadInfo": {
+        "type": "object",
+        "properties": {
+          "bundleId": {
+            "type": "string",
+            "description": "Bundle ID of the iPad app."
+          },
+          "fallbackUrl": {
+            "type": "string",
+            "description": "URL opened when the iPad app is not installed."
+          }
+        }
+      },
+      "AppLinkingLinkInfo": {
+        "type": "object",
+        "properties": {
+          "uriPrefix": {
+            "type": "string",
+            "description": "URL prefix of the link, like https://example.drcn.agconnect.link, requested in AppGallery Connect beforehand."
+          },
+          "deepLink": {
+            "type": "string",
+            "description": "Deep link: the page users are directed to when they tap the link. It must be a valid, accessible URL."
+          },
+          "android": {
+            "$ref": "#/components/schemas/AppLinkingAndroidInfo",
+            "description": "Android app: deep link, package name and what to open when the app is not installed."
+          },
+          "harmonyos": {
+            "$ref": "#/components/schemas/AppLinkingHarmonyOSInfo",
+            "description": "HarmonyOS app: deep link, package name and what to open when the app is not installed."
+          },
+          "ios": {
+            "$ref": "#/components/schemas/AppLinkingIOSInfo",
+            "description": "iOS app: deep link, bundle ID, what to open when the app is not installed, iPad app and App Store campaign parameters."
+          },
+          "socialCard": {
+            "$ref": "#/components/schemas/AppLinkingSocialCard",
+            "description": "Social meta tag: what is shown when the link is shared on social media."
+          },
+          "campaign": {
+            "$ref": "#/components/schemas/AppLinkingCampaign",
+            "description": "Campaign tracing parameters added to the link: channel, medium and campaign name."
+          },
+          "previewType": {
+            "type": "integer",
+            "description": "Preview page shown when the link is opened in a browser: 1 based on the app information, 2 based on socialCard. Default: 2 when socialCard is passed, otherwise 1."
+          },
+          "landingPageType": {
+            "type": "integer",
+            "description": "Whether to show the landing page when the app is not installed: 1 shown, 2 not shown (the app page in the store opens). Default: 2."
+          }
+        },
+        "required": [
+          "uriPrefix",
+          "deepLink"
+        ]
+      },
+      "AppLinkingSocialCard": {
+        "type": "object",
+        "properties": {
+          "title": {
+            "type": "string",
+            "description": "Title shown when the link is shared on social media."
+          },
+          "desc": {
+            "type": "string",
+            "description": "Description shown when the link is shared on social media."
+          },
+          "imageUrl": {
+            "type": "string",
+            "description": "URL of the image shown when the link is shared: at least 300 x 200 px and less than 300 KB."
+          }
+        }
+      },
       "AuditInfo": {
         "type": "object",
         "properties": {
@@ -5893,6 +7778,45 @@
             "description": "ICP information review comments. This parameter is returned only for apps released in the Chinese mainland."
           }
         }
+      },
+      "BrowsersCond": {
+        "type": "object",
+        "properties": {
+          "systemName": {
+            "type": "string",
+            "description": "Browser name."
+          },
+          "operator": {
+            "type": "string",
+            "description": "Operator: LESS_THAN, EQUAL, LESS_EQUAL, NOT_EQUAL, GREATER_THAN or GREATER_EQUAL."
+          },
+          "value": {
+            "type": "string",
+            "description": "Browser version number."
+          }
+        },
+        "required": [
+          "operator"
+        ]
+      },
+      "BrowsersVersionCond": {
+        "type": "object",
+        "properties": {
+          "operator": {
+            "type": "string",
+            "description": "Operator: or."
+          },
+          "values": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BrowsersCond"
+            },
+            "description": "Browser types and versions; up to 10 values."
+          }
+        },
+        "required": [
+          "operator"
+        ]
       },
       "CertInfo": {
         "type": "object",
@@ -5962,6 +7886,81 @@
           }
         }
       },
+      "ConfigItem": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "Parameter name."
+          },
+          "desc": {
+            "type": "string",
+            "description": "Parameter description."
+          },
+          "defaultValue": {
+            "$ref": "#/components/schemas/ConfigItemValue",
+            "description": "Default value of the parameter."
+          },
+          "filterValues": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FilterValue"
+            },
+            "description": "Values of the parameter for conditions, by condition name."
+          }
+        },
+        "required": [
+          "name",
+          "defaultValue"
+        ]
+      },
+      "ConfigItemValue": {
+        "type": "object",
+        "properties": {
+          "value": {
+            "type": "string",
+            "description": "Value of the parameter."
+          },
+          "useSdkValue": {
+            "type": "boolean",
+            "description": "Use the in-app default value instead of value."
+          }
+        }
+      },
+      "ConfigVersion": {
+        "type": "object",
+        "properties": {
+          "version": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Version number."
+          },
+          "updateTime": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Time of the version, in milliseconds since 1970-01-01 00:00:00 UTC."
+          }
+        },
+        "required": [
+          "version",
+          "updateTime"
+        ]
+      },
+      "CountryCond": {
+        "type": "object",
+        "properties": {
+          "values": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Country or region codes, like RU, DE, CN; up to 256 values."
+          }
+        },
+        "required": [
+          "values"
+        ]
+      },
       "CountryPriceInfo": {
         "type": "object",
         "properties": {
@@ -5987,6 +7986,30 @@
           }
         }
       },
+      "DateTimeCond": {
+        "type": "object",
+        "properties": {
+          "operator": {
+            "type": "string",
+            "description": "Operator: LESS_THAN (earlier than) or GREATER_EQUAL (later than)."
+          },
+          "dateTime": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Time in milliseconds since 1970-01-01 00:00:00 UTC; the later time must be after the earlier one."
+          },
+          "timeZone": {
+            "type": "string",
+            "description": "Time zone in the form UTC+HH:MM or with a minus sign, like UTC+03:00 or UTC+05:45."
+          }
+        },
+        "required": [
+          "operator",
+          "timeZone"
+        ]
+      },
       "DefaultProductPriceInfo": {
         "type": "object",
         "properties": {
@@ -6006,6 +8029,26 @@
         "required": [
           "country",
           "currency"
+        ]
+      },
+      "DeviceChipCond": {
+        "type": "object",
+        "properties": {
+          "operator": {
+            "type": "string",
+            "description": "Operator: CONTAINS (includes), NOT_CONTAINS (excludes), IN (equals) or REGEX (regular expression)."
+          },
+          "values": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Chipset models; up to 64 values, one value with REGEX."
+          }
+        },
+        "required": [
+          "operator",
+          "values"
         ]
       },
       "DeviceInfo": {
@@ -6236,6 +8279,87 @@
           }
         }
       },
+      "Filter": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "Condition name."
+          },
+          "desc": {
+            "type": "string",
+            "description": "Condition description."
+          },
+          "versionName": {
+            "$ref": "#/components/schemas/VersionNameCond",
+            "description": "App version name."
+          },
+          "deviceChip": {
+            "$ref": "#/components/schemas/DeviceChipCond",
+            "description": "Chipset model."
+          },
+          "language": {
+            "$ref": "#/components/schemas/LanguageCond",
+            "description": "Language."
+          },
+          "country": {
+            "$ref": "#/components/schemas/CountryCond",
+            "description": "Country or region."
+          },
+          "dateTimes": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DateTimeCond"
+            },
+            "description": "Date and time; up to two values."
+          },
+          "userRatio": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/UserRatioCond"
+            },
+            "description": "Percentage of users; up to 64 values."
+          },
+          "osVersion": {
+            "$ref": "#/components/schemas/VersionNameCond",
+            "description": "OS version."
+          },
+          "systemVersion": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SystemVersionCond"
+            },
+            "description": "OS types and versions; up to 64 values."
+          },
+          "browsersVersion": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BrowsersVersionCond"
+            },
+            "description": "Browser types and versions; up to 64 values."
+          }
+        },
+        "required": [
+          "name"
+        ]
+      },
+      "FilterValue": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "Condition name (name of a filter of the configuration)."
+          },
+          "value": {
+            "$ref": "#/components/schemas/ConfigItemValue",
+            "description": "Value of the parameter when the condition is met."
+          }
+        },
+        "required": [
+          "name",
+          "value"
+        ]
+      },
       "GetDevAppRatingRspData": {
         "type": "object",
         "properties": {
@@ -6289,6 +8413,21 @@
             "description": "Total number of replies."
           }
         }
+      },
+      "LanguageCond": {
+        "type": "object",
+        "properties": {
+          "values": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Language codes, like en, ru, zh_Hans; up to 256 values."
+          }
+        },
+        "required": [
+          "values"
+        ]
       },
       "LanguageInfo": {
         "type": "object",
@@ -7810,6 +9949,45 @@
           }
         }
       },
+      "SystemVersionCond": {
+        "type": "object",
+        "properties": {
+          "operator": {
+            "type": "string",
+            "description": "Operator: or."
+          },
+          "values": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SysversionCond"
+            },
+            "description": "OS types and versions; up to 10 values."
+          }
+        },
+        "required": [
+          "operator"
+        ]
+      },
+      "SysversionCond": {
+        "type": "object",
+        "properties": {
+          "systemName": {
+            "type": "string",
+            "description": "OS name."
+          },
+          "operator": {
+            "type": "string",
+            "description": "Operator: LESS_THAN, EQUAL, LESS_EQUAL, NOT_EQUAL, GREATER_THAN or GREATER_EQUAL."
+          },
+          "value": {
+            "type": "string",
+            "description": "OS version number."
+          }
+        },
+        "required": [
+          "operator"
+        ]
+      },
       "Team": {
         "type": "object",
         "properties": {
@@ -7844,6 +10022,716 @@
           "isMirror": {
             "type": "boolean",
             "description": "Indicates whether the account is a mirrored environment account."
+          }
+        }
+      },
+      "UserRatioCond": {
+        "type": "object",
+        "properties": {
+          "operator": {
+            "type": "string",
+            "description": "Operator: LESS_EQUAL (<=) or GREATER_THAN (>)."
+          },
+          "value": {
+            "type": "integer",
+            "description": "Share of users multiplied by 100000000, from 1 to 100000000: 2% is 2000000."
+          },
+          "randomValue": {
+            "type": "string",
+            "description": "Random number that maps app instances to the percentage scale; default: default. Use a different random number for an independent split."
+          }
+        },
+        "required": [
+          "operator",
+          "value"
+        ]
+      },
+      "VersionNameCond": {
+        "type": "object",
+        "properties": {
+          "operator": {
+            "type": "string",
+            "description": "Operator: CONTAINS (includes), NOT_CONTAINS (excludes), IN (equals) or REGEX (regular expression)."
+          },
+          "values": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Versions; up to 64 values, one value with REGEX."
+          }
+        },
+        "required": [
+          "operator",
+          "values"
+        ]
+      },
+      "IapPurchaseRequest": {
+        "type": "object",
+        "description": "Purchase of a consumable or non-consumable.",
+        "required": [
+          "purchaseToken",
+          "productId"
+        ],
+        "properties": {
+          "purchaseToken": {
+            "type": "string",
+            "description": "Purchase token from the purchase data (InAppPurchaseData) that the IAP client returns after a purchase or a purchase query."
+          },
+          "productId": {
+            "type": "string",
+            "description": "Product ID, as set in AppGallery Connect."
+          }
+        }
+      },
+      "IapSubscriptionRequest": {
+        "type": "object",
+        "description": "Purchase of a subscription.",
+        "required": [
+          "subscriptionId",
+          "purchaseToken"
+        ],
+        "properties": {
+          "subscriptionId": {
+            "type": "string",
+            "description": "Subscription ID (subscriptionId of the purchase data)."
+          },
+          "purchaseToken": {
+            "type": "string",
+            "description": "Purchase token from the purchase data (InAppPurchaseData) that the IAP client returns after a purchase or a purchase query."
+          }
+        }
+      },
+      "IapSubscriptionDelayRequest": {
+        "type": "object",
+        "description": "Deferral of the next billing date of a subscription.",
+        "required": [
+          "subscriptionId",
+          "purchaseToken",
+          "currentExpirationTime",
+          "desiredExpirationTime"
+        ],
+        "properties": {
+          "subscriptionId": {
+            "type": "string",
+            "description": "Subscription ID (subscriptionId of the purchase data)."
+          },
+          "purchaseToken": {
+            "type": "string",
+            "description": "Purchase token from the purchase data (InAppPurchaseData) that the IAP client returns after a purchase or a purchase query."
+          },
+          "currentExpirationTime": {
+            "type": "integer",
+            "format": "int64",
+            "description": "End of the current subscription period, UTC timestamp in milliseconds (expirationDate of the purchase data)."
+          },
+          "desiredExpirationTime": {
+            "type": "integer",
+            "format": "int64",
+            "description": "New end of the period, UTC timestamp in milliseconds: 1 to 365 days later than currentExpirationTime."
+          }
+        }
+      },
+      "IapCancelledListRequest": {
+        "type": "object",
+        "description": "Query of canceled or refunded purchases.",
+        "required": [
+          "type"
+        ],
+        "properties": {
+          "type": {
+            "type": "integer",
+            "enum": [
+              0,
+              1
+            ],
+            "description": "0: consumables and non-consumables; 1: also subscriptions. Ignored with continuationToken."
+          },
+          "startAt": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Earliest cancellation time, UTC timestamp in milliseconds, at most 30 days ago. Default: 30 days ago. Ignored with continuationToken."
+          },
+          "endAt": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Latest cancellation time, UTC timestamp in milliseconds, not later than now and not earlier than startAt. Default: now. Ignored with continuationToken."
+          },
+          "maxRows": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1000,
+            "description": "Maximum number of records; 1000 by default."
+          },
+          "continuationToken": {
+            "type": "string",
+            "description": "continuationToken of the previous response, to get the next page."
+          }
+        }
+      },
+      "IapOrderQueryRequest": {
+        "type": "object",
+        "description": "Query of orders by payment time.",
+        "required": [
+          "startAt",
+          "endAt"
+        ],
+        "properties": {
+          "startAt": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Start of the period, UTC timestamp in milliseconds, not later than now."
+          },
+          "endAt": {
+            "type": "integer",
+            "format": "int64",
+            "description": "End of the period, UTC timestamp in milliseconds: later than startAt by at most 48 hours."
+          },
+          "continuationToken": {
+            "type": "string",
+            "description": "continuationToken of the previous response, to get the next page."
+          }
+        }
+      },
+      "CancelledPurchase": {
+        "type": "object",
+        "description": "Canceled or refunded purchase.",
+        "properties": {
+          "orderId": {
+            "type": "string",
+            "description": "Order ID of the purchase or subscription renewal."
+          },
+          "productId": {
+            "type": "string",
+            "description": "Product ID."
+          },
+          "purchaseToken": {
+            "type": "string",
+            "description": "Purchase token."
+          },
+          "purchaseTime": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Purchase time, UTC timestamp in milliseconds."
+          },
+          "cancelledTime": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Cancellation or refund time, UTC timestamp in milliseconds."
+          },
+          "cancelledSource": {
+            "type": "integer",
+            "description": "Who canceled: 0 the user, 1 the developer, 2 Huawei."
+          },
+          "cancelledReason": {
+            "type": "integer",
+            "description": "Reason: 0 other, 1 the user changed their mind, 2 product not provided, 3 app service problem, 4 accidental purchase, 5 fraud, 6 chargeback, 7 upgrade or downgrade, 8 the user changed the service area."
+          }
+        }
+      },
+      "OrderInfo": {
+        "type": "object",
+        "description": "Payment or refund order.",
+        "properties": {
+          "orderNo": {
+            "type": "string",
+            "description": "Huawei order ID."
+          },
+          "requestId": {
+            "type": "string",
+            "description": "Merchant request ID."
+          },
+          "country": {
+            "type": "string",
+            "description": "Country or region code (ISO 3166)."
+          },
+          "merchantId": {
+            "type": "string",
+            "description": "Merchant ID."
+          },
+          "applicationId": {
+            "type": "string",
+            "description": "App ID."
+          },
+          "orderTime": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Order time, UTC timestamp in milliseconds."
+          },
+          "tradeTime": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Payment time, UTC timestamp in milliseconds."
+          },
+          "productId": {
+            "type": "string",
+            "description": "Product ID."
+          },
+          "productName": {
+            "type": "string",
+            "description": "Product name."
+          },
+          "payMoney": {
+            "type": "string",
+            "description": "Payment amount in the currency."
+          },
+          "couponAmt": {
+            "type": "string",
+            "description": "Coupon amount."
+          },
+          "mpAmt": {
+            "type": "string",
+            "description": "Amount paid with bonus points."
+          },
+          "mpRfdAmt": {
+            "type": "string",
+            "description": "Amount refunded as bonus points."
+          },
+          "currency": {
+            "type": "string",
+            "description": "Currency."
+          },
+          "payType": {
+            "type": "integer",
+            "description": "Payment method (PayType of the data models)."
+          },
+          "tradeState": {
+            "type": "integer",
+            "description": "Order status: 0 successful, 2 failed, 4 unpaid."
+          },
+          "tradeType": {
+            "type": "string",
+            "enum": [
+              "PURCHASE",
+              "REFUND"
+            ],
+            "description": "PURCHASE: payment; REFUND: refund."
+          },
+          "oriOrderNo": {
+            "type": "string",
+            "description": "Original Huawei order of a refund."
+          },
+          "refundTime": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Refund time, UTC timestamp in milliseconds."
+          },
+          "refundMoney": {
+            "type": "string",
+            "description": "Refund amount."
+          }
+        }
+      },
+      "InappPurchaseDetails": {
+        "type": "object",
+        "description": "Purchase data of a product or subscription (InAppPurchaseData). Fields of subscriptions are present only for subscriptions.",
+        "properties": {
+          "applicationId": {
+            "type": "integer",
+            "format": "int64",
+            "description": "App ID."
+          },
+          "packageName": {
+            "type": "string",
+            "description": "Package name of the app."
+          },
+          "orderId": {
+            "type": "string",
+            "description": "Order ID."
+          },
+          "kind": {
+            "type": "integer",
+            "description": "Product type: 0 consumable, 1 non-consumable, 2 subscription."
+          },
+          "productId": {
+            "type": "string",
+            "description": "Product ID."
+          },
+          "productName": {
+            "type": "string",
+            "description": "Product name."
+          },
+          "purchaseTime": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Purchase time, UTC timestamp in milliseconds."
+          },
+          "purchaseState": {
+            "type": "integer",
+            "description": "Transaction status: -1 initialized, 0 purchased, 1 canceled, 2 refunded, 3 pending."
+          },
+          "developerPayload": {
+            "type": "string",
+            "description": "Data the app passed when it started the purchase."
+          },
+          "consumptionState": {
+            "type": "integer",
+            "description": "One-off products: 0 not consumed, 1 consumed."
+          },
+          "confirmed": {
+            "type": "integer",
+            "description": "0 not confirmed, 1 confirmed; missing when no confirmation is needed."
+          },
+          "purchaseToken": {
+            "type": "string",
+            "description": "Purchase token."
+          },
+          "purchaseType": {
+            "type": "integer",
+            "description": "0: sandbox purchase; missing for real purchases."
+          },
+          "currency": {
+            "type": "string",
+            "description": "Currency (ISO 4217)."
+          },
+          "price": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Price multiplied by 100."
+          },
+          "country": {
+            "type": "string",
+            "description": "Country or region code (ISO 3166)."
+          },
+          "payType": {
+            "type": "string",
+            "description": "Payment method (PayType of the data models)."
+          },
+          "payOrderId": {
+            "type": "string",
+            "description": "Transaction ID of the payment."
+          },
+          "autoRenewing": {
+            "type": "boolean",
+            "description": "Subscriptions: renews automatically on the next renewal date. Always false for other products."
+          },
+          "subscriptionId": {
+            "type": "string",
+            "description": "Subscription ID."
+          },
+          "lastOrderId": {
+            "type": "string",
+            "description": "ID of the last renewal order."
+          },
+          "productGroup": {
+            "type": "string",
+            "description": "Subscription group ID."
+          },
+          "oriPurchaseTime": {
+            "type": "integer",
+            "format": "int64",
+            "description": "First purchase time, UTC timestamp in milliseconds."
+          },
+          "subIsvalid": {
+            "type": "boolean",
+            "description": "The subscription is paid, not expired and not refunded, or is in a grace period: the user has access."
+          },
+          "expirationDate": {
+            "type": "integer",
+            "format": "int64",
+            "description": "End of the current subscription period, UTC timestamp in milliseconds."
+          },
+          "renewStatus": {
+            "type": "integer",
+            "description": "1: renews at the end of the period; 0: the user canceled the renewal."
+          },
+          "cancelTime": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Revocation time, UTC timestamp in milliseconds."
+          },
+          "cancelReason": {
+            "type": "integer",
+            "description": "Reason of the cancellation."
+          },
+          "cancellationTime": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Time the renewal was stopped, UTC timestamp in milliseconds."
+          },
+          "trialFlag": {
+            "type": "integer",
+            "description": "1: free trial period."
+          },
+          "introductoryFlag": {
+            "type": "integer",
+            "description": "1: promotional renewal period."
+          },
+          "graceExpirationTime": {
+            "type": "integer",
+            "format": "int64",
+            "description": "End of the grace period, UTC timestamp in milliseconds."
+          }
+        }
+      },
+      "IapKitPurchaseRequest": {
+        "type": "object",
+        "required": [
+          "purchaseOrderId",
+          "purchaseToken"
+        ],
+        "properties": {
+          "purchaseOrderId": {
+            "type": "string",
+            "description": "Order ID of the purchase (purchaseOrderId); at most 256 characters."
+          },
+          "purchaseToken": {
+            "type": "string",
+            "description": "Purchase token of the product, from the purchase result or an order query; at most 256 characters."
+          }
+        }
+      },
+      "IapKitTradeOrdersRequest": {
+        "type": "object",
+        "required": [
+          "startTime",
+          "endTime"
+        ],
+        "properties": {
+          "startTime": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Start of the range, UTC timestamp in milliseconds; not later than now."
+          },
+          "endTime": {
+            "type": "integer",
+            "format": "int64",
+            "description": "End of the range, UTC timestamp in milliseconds; later than startTime and at most 48 hours after it."
+          },
+          "continuationToken": {
+            "type": "string",
+            "description": "Pagination flag: pass the continuationToken of the previous response to get the next page."
+          }
+        }
+      },
+      "IapKitRenewalPostponeRequest": {
+        "type": "object",
+        "required": [
+          "purchaseOrderId",
+          "purchaseToken",
+          "requestId",
+          "modifyReason",
+          "extendByDays"
+        ],
+        "properties": {
+          "purchaseOrderId": {
+            "type": "string",
+            "description": "Order ID of the purchase (purchaseOrderId); at most 256 characters."
+          },
+          "purchaseToken": {
+            "type": "string",
+            "description": "Purchase token of the product, from the purchase result or an order query; at most 256 characters."
+          },
+          "requestId": {
+            "type": "string",
+            "description": "Unique ID of this postponement request, generated by the developer."
+          },
+          "modifyReason": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Reason of the postponement (see the reference)."
+          },
+          "extendByDays": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Number of days, 1 to 90."
+          }
+        }
+      },
+      "IapKitOrderLookupRequest": {
+        "type": "object",
+        "required": [
+          "orderNo"
+        ],
+        "properties": {
+          "orderNo": {
+            "type": "string",
+            "description": "Order number that the user sees in Settings > HUAWEI ID > Payment and purchases > Purchase history."
+          }
+        }
+      },
+      "IapKitUserOrdersRequest": {
+        "type": "object",
+        "required": [
+          "purchaseOrderId"
+        ],
+        "properties": {
+          "purchaseOrderId": {
+            "type": "string",
+            "description": "ID of a purchase order of the user; at most 256 characters."
+          },
+          "productType": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Product type of the history to query (see the reference)."
+          },
+          "startTime": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Start of the range, UTC timestamp in milliseconds."
+          },
+          "endTime": {
+            "type": "integer",
+            "format": "int64",
+            "description": "End of the range, UTC timestamp in milliseconds."
+          },
+          "productIdList": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Product IDs, at most 10."
+          },
+          "subGroupIdList": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Subscription group IDs, at most 10."
+          },
+          "refunded": {
+            "type": "boolean",
+            "description": "Whether to query purchase records with refunds."
+          },
+          "sort": {
+            "type": "string",
+            "description": "Order of the returned records (see the reference)."
+          },
+          "continuationToken": {
+            "type": "string",
+            "description": "Pagination flag: pass the continuationToken of the previous response to get the next page."
+          }
+        }
+      },
+      "IapKitNotificationsRequest": {
+        "type": "object",
+        "required": [
+          "startTime",
+          "endTime"
+        ],
+        "properties": {
+          "startTime": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Start of the range, UTC timestamp in milliseconds."
+          },
+          "endTime": {
+            "type": "integer",
+            "format": "int64",
+            "description": "End of the range, UTC timestamp in milliseconds."
+          },
+          "notificationType": {
+            "type": "string",
+            "description": "Notification type (NotificationType); all types when omitted."
+          },
+          "sendResult": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Sending result; both successful and failed records when omitted."
+          },
+          "purchaseOrderIdList": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Purchase order IDs."
+          },
+          "continuationToken": {
+            "type": "string",
+            "description": "Pagination flag: pass the continuationToken of the previous response to get the next page."
+          }
+        }
+      },
+      "IapKitEmptyRequest": {
+        "type": "object",
+        "properties": {}
+      },
+      "IapKitRefundResultRequest": {
+        "type": "object",
+        "required": [
+          "reviewType",
+          "refundBatchNo",
+          "notifyTime",
+          "applicationId",
+          "reviewResultList"
+        ],
+        "properties": {
+          "reviewType": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Review result (see the reference)."
+          },
+          "refundBatchNo": {
+            "type": "string",
+            "description": "Refund work order number or batch number from the refund request notification."
+          },
+          "remark": {
+            "type": "string",
+            "description": "Review remarks; the rejection reason when the request is rejected."
+          },
+          "notifyTime": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Notification time, UTC timestamp in milliseconds."
+          },
+          "applicationId": {
+            "type": "string",
+            "description": "App ID."
+          },
+          "totalRefundAmount": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Total approved refund amount, in fen (RMB); mandatory when the refund is approved."
+          },
+          "currency": {
+            "type": "string",
+            "description": "Currency; mandatory when the refund is approved."
+          },
+          "reviewResultList": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/IapKitReviewResult"
+            },
+            "description": "Refund details per order."
+          }
+        }
+      },
+      "IapKitReviewResult": {
+        "type": "object",
+        "required": [
+          "purchaseOrderId",
+          "payMoney",
+          "refundMoney"
+        ],
+        "properties": {
+          "purchaseOrderId": {
+            "type": "string",
+            "description": "Order ID of the purchase (purchaseOrderId); at most 256 characters."
+          },
+          "payMoney": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Amount actually paid for the order, in fen (RMB)."
+          },
+          "refundMoney": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Approved refund amount, in fen (RMB)."
+          },
+          "consumptionStatus": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Entitlement usage status."
+          },
+          "ratio": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Entitlement usage ratio, percent from 0 to 100."
+          },
+          "playTime": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Entitlement usage duration."
           }
         }
       }

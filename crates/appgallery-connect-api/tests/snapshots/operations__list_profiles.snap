@@ -4,6 +4,11 @@ expression: "snapshot_view(op(\"list_profiles\"))"
 ---
 {
   "access": "read",
+  "auth_modes": [
+    "api-client",
+    "oauth-client",
+    "service-account"
+  ],
   "body": null,
   "description": "The app ID is passed in the appId header; the provisionId header narrows the result to one profile. Paged with fromRecCount and maxReqCount (up to 100).",
   "group": "provisioning",

@@ -106,6 +106,7 @@ fn context(server: &MockServer, root: &Path, apps: &[&str]) -> Context {
             packages: Vec::new(),
         },
         access: AccessLevel::Write,
+        http: false,
     }
 }
 

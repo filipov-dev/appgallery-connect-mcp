@@ -38,7 +38,7 @@ curl -fsSL https://codeload.sourcecraft.tech/filipov-dev/appgallery-connect-mcp/
 
 ```bash
 # Конкретная версия
-curl -fsSL https://codeload.sourcecraft.tech/filipov-dev/appgallery-connect-mcp/tarball/refs/heads/install | tar -xzO | sh -s -- --version v0.1.0
+curl -fsSL https://codeload.sourcecraft.tech/filipov-dev/appgallery-connect-mcp/tarball/refs/heads/install | tar -xzO | sh -s -- --version v0.2.0
 
 # Другой каталог: бинарник попадёт в /opt/agc/bin
 curl -fsSL https://codeload.sourcecraft.tech/filipov-dev/appgallery-connect-mcp/tarball/refs/heads/install | tar -xzO | sh -s -- --prefix /opt/agc
@@ -77,7 +77,7 @@ brew uninstall filipov-dev/tap/appgallery-connect-mcp
 
 ## Готовый архив
 
-Архивы и файл `SHA256SUMS` публикуются на [странице релизов](https://sourcecraft.dev/filipov-dev/appgallery-connect-mcp/releases). Имя архива: `appgallery-connect-mcp-<тег>-<платформа>.tar.gz`, например `appgallery-connect-mcp-v0.1.0-linux-x86_64.tar.gz` (для Windows — `.zip`, см. [Windows](#windows)). Внутри — каталог с бинарником `appgallery-connect-mcp`, `README.md` и лицензиями.
+Архивы и файл `SHA256SUMS` публикуются на [странице релизов](https://sourcecraft.dev/filipov-dev/appgallery-connect-mcp/releases). Имя архива: `appgallery-connect-mcp-<тег>-<платформа>.tar.gz`, например `appgallery-connect-mcp-v0.2.0-linux-x86_64.tar.gz` (для Windows — `.zip`, см. [Windows](#windows)). Внутри — каталог с бинарником `appgallery-connect-mcp`, `README.md` и лицензиями.
 
 Проверьте контрольную сумму (из каталога, куда скачаны архив и `SHA256SUMS`):
 
@@ -92,8 +92,8 @@ grep macos-universal SHA256SUMS | shasum -a 256 -c -
 Распакуйте и установите бинарник в каталог из `PATH`:
 
 ```bash
-tar -xzf appgallery-connect-mcp-v0.1.0-linux-x86_64.tar.gz
-sudo install -m 0755 appgallery-connect-mcp-v0.1.0-linux-x86_64/appgallery-connect-mcp /usr/local/bin/
+tar -xzf appgallery-connect-mcp-v0.2.0-linux-x86_64.tar.gz
+sudo install -m 0755 appgallery-connect-mcp-v0.2.0-linux-x86_64/appgallery-connect-mcp /usr/local/bin/
 appgallery-connect-mcp --version
 ```
 
@@ -113,7 +113,7 @@ codesign -dv --verbose=2 /usr/local/bin/appgallery-connect-mcp
 Скачайте архив и `SHA256SUMS` в один каталог и выполните в PowerShell из него (тег замените на нужный):
 
 ```powershell
-$tag = 'v0.1.0'
+$tag = 'v0.2.0'
 $zip = "appgallery-connect-mcp-$tag-windows-x86_64.zip"
 
 # Контрольная сумма: значение должно совпасть со строкой архива в SHA256SUMS

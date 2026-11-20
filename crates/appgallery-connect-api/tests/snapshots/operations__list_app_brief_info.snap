@@ -4,6 +4,9 @@ expression: "snapshot_view(op(\"list_app_brief_info\"))"
 ---
 {
   "access": "read",
+  "auth_modes": [
+    "oauth-client"
+  ],
   "body": null,
   "description": "Pass appId or packageNames (comma-separated); appId wins when both are passed. The userID header is the team account ID. The reference documents this operation for the OAuth client mode only.",
   "group": "project",

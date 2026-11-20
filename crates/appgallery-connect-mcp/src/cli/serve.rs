@@ -1,4 +1,5 @@
-//! `appgallery-connect-mcp serve` — запуск MCP-сервера через stdio.
+//! `appgallery-connect-mcp serve` — запуск MCP-сервера через stdio или HTTP (`--http`,
+//! [`http_server`]: учётные данные на стороне сервера, клиенты приходят с токенами доступа).
 //!
 //! stdout занят протоколом MCP, всё остальное (логи, ошибки запуска) — только в stderr.
 //! Ошибка запуска (нет учётных данных, хранилище недоступно, неизвестный набор) возвращается
@@ -19,6 +20,7 @@
 //! рабочим и временным каталогом; несуществующий каталог — ошибка запуска. Секреты
 //! составных инструментов — в отдельном сервисе системного хранилища (`KeyringVault`).
 
+use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
@@ -26,7 +28,7 @@ use std::time::Duration;
 use anyhow::{Context as _, anyhow, bail};
 use appgallery_connect_api::{
     AccessLevel, ApiClient, ClientConfig, CredentialStore, KEYRING_SERVICE, KeyringStore,
-    KeyringVault,
+    KeyringVault, Region, oauth_account,
 };
 use appgallery_connect_mcp_core::{
     ALL_TOOLSETS, AppGalleryServer, DEFAULT_PROFILE_NAME, ServerOptions, Services, ToolRegistry,
@@ -39,9 +41,14 @@ use tracing_subscriber::EnvFilter;
 
 use crate::cli::{ProfileArg, jq_worker, tools};
 use crate::profiles::{
-    ProfileRepo, ProfileSettings, describe_region, load_profile_with, validate_profile_name,
+    ProfileKind, ProfileRepo, ProfileSettings, describe_region, load_app_secrets,
+    load_profile_with, load_projects, parse_region, save_rotated_sign_in, validate_profile_name,
 };
 use crate::ui::{TerminalUi, Ui};
+
+mod access_tokens;
+mod http_server;
+mod secret_file;
 
 /// Таймаут запроса к API по умолчанию, секунды.
 pub const DEFAULT_TIMEOUT_SECS: u64 = 60;
@@ -77,7 +84,10 @@ before it starts.
 
 Credentials: the API client ID and secret are read only from the system keychain (service \
 `dev.filipov.appgallery-connect-mcp`) by profile; store them with `appgallery-connect-mcp auth \
-login`. They are never read from environment variables, files or command-line arguments. The \
+login`. A profile signed in with `auth login --oauth` works as that HUAWEI ID user in the team \
+of the profile instead: its OAuth client and refresh token are read from the same keychain. \
+They are never read from environment variables, files or command-line arguments (the only \
+exception is --secret-file of HTTP mode, below). The \
 region of the profile selects the API host. Access tokens are requested on the first API call \
 and kept in memory only, so starting the server needs no network.
 
@@ -96,7 +106,24 @@ temporary directory and the directories given with --allow-path; existing files 
 overwritten. Files are downloaded only from Huawei hosts.
 
 Logs go to stderr only (stdout carries the MCP protocol). The level comes from --log-level, \
-otherwise from RUST_LOG, otherwise `warn`.")]
+otherwise from RUST_LOG, otherwise `warn`.
+
+HTTP mode (--http): the server listens on --listen (default 127.0.0.1:8769) and serves MCP at \
+/mcp (Streamable HTTP, stateless, JSON responses) and a health check at /health. The API \
+client credentials stay on the server: they come from the system keychain of --profile or, in \
+a container, from --secret-file (a Docker or Kubernetes secret readable only by its owner, \
+mode 0600 or 0400) with the client secret and --client-id, or with JSON {\"client_id\", \
+\"client_secret\"}; --region sets the site (default: the region of the profile; required without a profile). \
+Clients send an access token in `Authorization: Bearer <token>`; --access-tokens names a TOML \
+file with the SHA-256 of every token and its access level and toolsets ([[tokens]] with name, \
+sha256, access = read|write|destructive, toolsets). A token's access cannot exceed \
+--allow-write or --allow-destructive of the server; tokens without toolsets get --toolsets. \
+Requests without a known token get HTTP 401. File arguments work only with server directories \
+given with --allow-path (relative paths start in the first one); without it tools that need a \
+file are not registered. Custom tools come only from --tools-file. Requests must use a \
+loopback Host, the --listen address or an --allowed-host; browser requests are rejected unless \
+their Origin is allowed with --allowed-origin. Outside loopback, put the server behind a TLS \
+reverse proxy.")]
 pub struct ServeArgs {
     #[command(flatten)]
     pub profile: ProfileArg,
@@ -112,15 +139,17 @@ pub struct ServeArgs {
     #[arg(long, value_delimiter = ',', value_name = "TOOLSET,...")]
     pub toolsets: Vec<String>,
     /// Load toolsets on demand: start with only the toolset tools (and the toolsets of
-    /// --toolsets), and let the agent enable toolsets with `enable_toolset`.
-    #[arg(long)]
+    /// --toolsets), and let the agent enable toolsets with `enable_toolset`. Not available
+    /// with --http.
+    #[arg(long, conflicts_with = "http")]
     pub dynamic_toolsets: bool,
     /// Additional custom tools file (same format as
     /// ~/.config/appgallery-connect-mcp/tools.toml). Repeatable.
     #[arg(long, value_name = "PATH")]
     pub tools_file: Vec<PathBuf>,
     /// Extra directory that tools may read files from or save files to (`save_to`), besides
-    /// the working directory and the temporary directory. Repeatable; must exist.
+    /// the working directory and the temporary directory (with --http: instead of them).
+    /// Repeatable; must exist.
     #[arg(long, value_name = "DIR")]
     pub allow_path: Vec<PathBuf>,
     /// Timeout of one API request, in seconds.
@@ -134,9 +163,44 @@ pub struct ServeArgs {
     #[arg(long, value_name = "LEVEL")]
     pub log_level: Option<String>,
     /// Print the effective profile, access level and toolsets, then exit without starting
-    /// the server (no network).
-    #[arg(long)]
+    /// the server (no network). Not available with --http.
+    #[arg(long, conflicts_with = "http")]
     pub status: bool,
+    /// Serve MCP over HTTP instead of stdio; clients authenticate with access tokens and the
+    /// API client credentials stay on the server.
+    #[arg(long)]
+    pub http: bool,
+    /// Address and port to listen on in HTTP mode [default: 127.0.0.1:8769].
+    #[arg(long, value_name = "IP:PORT", requires = "http")]
+    pub listen: Option<SocketAddr>,
+    /// HTTP mode: TOML file with the SHA-256 hashes, access levels and toolsets of the
+    /// clients' access tokens. Required with --http.
+    #[arg(long, value_name = "PATH", requires = "http")]
+    pub access_tokens: Option<PathBuf>,
+    /// HTTP mode: read the API client secret from this file (a Docker or Kubernetes secret,
+    /// mode 0600 or 0400) instead of the system keychain of the profile. The file holds the
+    /// secret alone (then pass --client-id) or JSON with client_id and client_secret.
+    #[arg(long, value_name = "PATH", requires = "http")]
+    pub secret_file: Option<PathBuf>,
+    /// HTTP mode: the API client ID for a --secret-file that holds only the secret.
+    #[arg(long, value_name = "ID", requires = "secret_file")]
+    pub client_id: Option<String>,
+    /// HTTP mode: AppGallery Connect site of the API client: cn, de, sg or ru [default: the
+    /// region of the profile; required with --secret-file and no saved profile].
+    #[arg(long, value_name = "REGION", requires = "http", value_parser = parse_region)]
+    pub region: Option<Region>,
+    /// Extra allowed Host header value in HTTP mode: a name (any port) or name:port.
+    /// Repeatable. Loopback names and the --listen address are always allowed.
+    #[arg(long, value_name = "HOST", requires = "http")]
+    pub allowed_host: Vec<String>,
+    /// Browser Origin allowed in HTTP mode, e.g. http://localhost:6274 (`:*` for any port).
+    /// Repeatable. Requests without an Origin header are always allowed.
+    #[arg(long, value_name = "ORIGIN", requires = "http")]
+    pub allowed_origin: Vec<String>,
+    /// Maximum size of an MCP request body in HTTP mode; larger requests get HTTP 413
+    /// [default: 1048576].
+    #[arg(long, value_name = "BYTES", requires = "http")]
+    pub max_request_bytes: Option<usize>,
 }
 
 impl ServeArgs {
@@ -152,6 +216,9 @@ impl ServeArgs {
         if self.max_response_bytes == 0 {
             bail!("--max-response-bytes must be greater than 0");
         }
+        if self.max_request_bytes == Some(0) {
+            bail!("--max-request-bytes must be greater than 0");
+        }
         // Неизвестный набор в флагах — ошибка до обращения к хранилищу учётных данных.
         normalize_toolsets(&self.toolsets).map_err(|err| anyhow!(err))?;
         validate_profile_name(self.profile())
@@ -161,11 +228,16 @@ impl ServeArgs {
 pub async fn run(args: ServeArgs) -> anyhow::Result<()> {
     init_logging(args.log_level.as_deref())?;
     args.validate()?;
+    if args.http {
+        return http_server::run_from_args(&args).await;
+    }
     let repo = ProfileRepo::open_default()?;
     if args.status {
         return status(&KeyringStore, &repo, &args, &mut TerminalUi);
     }
-    let setup = Setup::load(&args, &KeyringStore, &repo)?;
+    let mut setup = Setup::load(&args, &KeyringStore, &repo)?;
+    // Новый refresh token входа пользователя (если HUAWEI ID его выдаст) — в хранилище.
+    save_rotated_sign_in(&mut setup.config, args.profile());
     tracing::info!(
         profile = %args.profile(),
         access = ?setup.options.max_access,
@@ -220,6 +292,11 @@ impl Setup {
         let profile_name = args.profile();
         let profile = load_profile_with(repo, store, profile_name)
             .with_context(|| format!("cannot load profile `{profile_name}`"))?;
+        // Проект без клиента в хранилище не мешает запуску: его операции объяснят агенту,
+        // что делать.
+        for problem in profile.project_problems.iter().chain(&profile.app_problems) {
+            tracing::warn!("{problem}");
+        }
         let mut options = effective_options(args, &profile.settings)?;
         options.custom_tools = custom_tools;
         options.jq = jq_worker::current_runner();
@@ -328,7 +405,10 @@ pub fn status(
     args.validate()?;
     let profile = args.profile();
     let settings = repo.get(profile)?.unwrap_or_default();
-    let has_credentials = store.contains(profile)?;
+    let has_credentials = match settings.kind {
+        ProfileKind::ApiClient => store.contains(profile)?,
+        ProfileKind::Oauth => store.contains_oauth(profile)?,
+    };
     let (access, access_source) = effective_access(args, &settings);
     let (_, toolsets_source) = effective_toolsets(args, &settings)?;
     let tools_file = tools::user_tools_file(repo);
@@ -340,14 +420,68 @@ pub fn status(
 
     ui.say(&format!("Profile:     {profile}"));
     ui.say(&format!("Server name: {}", server_name(profile)));
-    let credentials = if has_credentials {
-        format!("stored in the system keychain (service `{KEYRING_SERVICE}`)")
-    } else {
-        format!(
+    let credentials = match (settings.kind, has_credentials) {
+        (ProfileKind::ApiClient, true) => {
+            format!("API client, stored in the system keychain (service `{KEYRING_SERVICE}`)")
+        }
+        (ProfileKind::ApiClient, false) => format!(
             "not found; store them with `appgallery-connect-mcp auth login --profile {profile}`"
-        )
+        ),
+        (ProfileKind::Oauth, true) => format!(
+            "{}, team {}, stored in the system keychain (service `{KEYRING_SERVICE}`, account \
+             `{}`)",
+            ProfileKind::Oauth.title(),
+            settings.team_id.as_deref().unwrap_or("- (sign in again)"),
+            oauth_account(profile)
+        ),
+        (ProfileKind::Oauth, false) => format!(
+            "{}: not found; sign in with `appgallery-connect-mcp auth login --oauth --profile \
+             {profile}`",
+            ProfileKind::Oauth.title()
+        ),
     };
     ui.say(&format!("Credentials: {credentials}"));
+    if !settings.projects.is_empty() {
+        let (found, _) = load_projects(store, profile, &settings.projects)?;
+        let found: Vec<&str> = found.iter().map(|p| p.project_id()).collect();
+        let missing: Vec<&str> = settings
+            .projects
+            .iter()
+            .map(String::as_str)
+            .filter(|id| !found.contains(id))
+            .collect();
+        let mut line = format!(
+            "{} with a project-level API client",
+            list_or_none_str(&found)
+        );
+        if !missing.is_empty() {
+            line.push_str(&format!(
+                "; not usable: {} (`appgallery-connect-mcp auth project add --profile {profile} \
+                 --project-id <ID>`)",
+                missing.join(", ")
+            ));
+        }
+        ui.say(&format!("Projects:    {line}"));
+    }
+    if !settings.app_secrets.is_empty() {
+        let (found, _) = load_app_secrets(store, profile, &settings.app_secrets)?;
+        let found: Vec<&str> = found.iter().map(|app| app.app_id()).collect();
+        let missing: Vec<&str> = settings
+            .app_secrets
+            .iter()
+            .map(String::as_str)
+            .filter(|id| !found.contains(id))
+            .collect();
+        let mut line = format!("{} with an app secret", list_or_none_str(&found));
+        if !missing.is_empty() {
+            line.push_str(&format!(
+                "; not usable: {} (`appgallery-connect-mcp auth app-secret set --profile \
+                 {profile} --app <APP_ID>`)",
+                missing.join(", ")
+            ));
+        }
+        ui.say(&format!("App secrets: {line}"));
+    }
     ui.say(&format!(
         "Region:      {}",
         describe_region(settings.region)
@@ -415,6 +549,14 @@ pub fn status(
         ui.say("The server cannot start until the profile has credentials.");
     }
     Ok(())
+}
+
+fn list_or_none_str(values: &[&str]) -> String {
+    if values.is_empty() {
+        "none".to_owned()
+    } else {
+        values.join(", ")
+    }
 }
 
 fn list_or_none(values: &[String]) -> String {
@@ -694,6 +836,31 @@ mod tests {
     }
 
     #[test]
+    fn project_clients_come_from_the_profile() {
+        let saved = ProfileSettings {
+            projects: vec!["100".into(), "200".into()],
+            ..settings(false, false, &[])
+        };
+        let (_dir, repo, store) = fixture(Some(saved), true);
+        store
+            .set_project("ci", "100", &credentials("project"))
+            .unwrap();
+        let text = status_text(&["--profile", "ci"], &repo, &store);
+        assert!(
+            text.contains("Projects:    100 with a project-level API client; not usable: 200"),
+            "{text}"
+        );
+        assert!(text.contains("auth project add --profile ci"), "{text}");
+        assert!(!text.contains(&client_id("project")), "{text}");
+
+        // Клиент проекта без записи не мешает запуску; найденный — в настройках клиента API.
+        let setup = Setup::load(&parse(&["--profile", "ci"]), &store, &repo).unwrap();
+        assert_eq!(setup.config.projects.len(), 1);
+        assert_eq!(setup.config.projects[0].project_id(), "100");
+        assert_eq!(setup.config.profile.as_deref(), Some("ci"));
+    }
+
+    #[test]
     fn setup_requires_credentials() {
         let (_dir, repo, store) = fixture(Some(settings(false, false, &[])), false);
         let err = Setup::load(&parse(&["--profile", "ci"]), &store, &repo)
@@ -797,6 +964,108 @@ mod tests {
         let text = serde_json::to_string(&result.content).unwrap();
         assert!(text.contains("en-US"), "{text}");
         assert!(!text.contains("served-token"), "{text}");
+
+        client.cancel().await.unwrap();
+        handle.await.unwrap();
+    }
+
+    /// Профиль со входом пользователя: `--status` показывает вход и команду, сервер шлёт
+    /// `oauth2Token` и `teamId`, а операции только для API-клиента отклоняет до запроса.
+    #[tokio::test]
+    async fn user_sign_in_profile_serves_as_the_user_of_its_team() {
+        use crate::profiles::ProfileKind;
+        use crate::testing::{mount_user_sign_in, refresh_token, sign_in, user_access_token};
+        use appgallery_connect_api::OAuthEndpoints;
+
+        let api = MockServer::start().await;
+        mount_user_sign_in(&api, "serve", json!([])).await;
+        Mock::given(method("GET"))
+            .and(path("/api/publish/v2/app-info"))
+            .and(header("oauth2Token", user_access_token().as_str()))
+            .and(header("teamId", "5100"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "ret": {"code": 0, "msg": "success"},
+                "appInfo": {"defaultLang": "en-US"}
+            })))
+            .expect(1)
+            .mount(&api)
+            .await;
+
+        let (_dir, repo, store) = fixture(
+            Some(ProfileSettings {
+                kind: ProfileKind::Oauth,
+                team_id: Some("5100".into()),
+                ..settings(false, false, &[])
+            }),
+            false,
+        );
+        let text = status_text(&["--profile", "ci"], &repo, &store);
+        assert!(text.contains("(OAuth client): not found"), "{text}");
+        assert!(text.contains("auth login --oauth --profile ci"), "{text}");
+        store.set_oauth("ci", &sign_in("serve")).unwrap();
+        let text = status_text(&["--profile", "ci"], &repo, &store);
+        assert!(text.contains("team 5100"), "{text}");
+        assert!(text.contains("account `ci/oauth`"), "{text}");
+        assert!(!text.contains(&refresh_token("serve")), "{text}");
+
+        let mut setup = Setup::load(&parse(&["--profile", "ci"]), &store, &repo).unwrap();
+        assert!(setup.config.credentials.is_none());
+        let session = setup.config.oauth.as_mut().unwrap();
+        assert_eq!(session.team_id.as_deref(), Some("5100"));
+        session.endpoints = OAuthEndpoints::huawei()
+            .with_token_url(&format!("{}/oauth2/v3/token", api.uri()))
+            .unwrap();
+        setup.config.base_url = Some(api.uri());
+        // Запуск не обращается к сети.
+        assert_eq!(api.received_requests().await.unwrap().len(), 0);
+        let server = setup.server().unwrap();
+
+        let (server_io, client_io) = tokio::io::duplex(1024 * 1024);
+        let handle = tokio::spawn(async move {
+            let running = server.serve(server_io).await.unwrap();
+            let _ = running.waiting().await;
+        });
+        let client = ().serve(client_io).await.unwrap();
+        let instructions = client.peer_info().unwrap().instructions.clone().unwrap();
+        assert!(instructions.contains("team `5100`"), "{instructions}");
+
+        let call = |name: &str, args: serde_json::Value| {
+            CallToolRequestParams::new(name.to_owned())
+                .with_arguments(args.as_object().unwrap().clone())
+        };
+        let result = client
+            .call_tool(call("get_app_info", json!({"appId": "100000001"})))
+            .await
+            .unwrap();
+        assert_eq!(result.is_error, Some(false), "{result:?}");
+        let text = serde_json::to_string(&result.content).unwrap();
+        assert!(text.contains("en-US"), "{text}");
+        assert!(!text.contains(&user_access_token()), "{text}");
+
+        let result = client
+            .call_tool(call(
+                "list_reviews",
+                json!({
+                    "appId": "100000001",
+                    "countries": "RU",
+                    "beginTime": 1_700_000_000_000_i64,
+                    "endTime": 1_700_100_000_000_i64
+                }),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(result.is_error, Some(true), "{result:?}");
+        let text = serde_json::to_string(&result.content).unwrap();
+        assert!(text.contains("API client"), "{text}");
+        // Отзывы не запрашивались: кроме входа и сведений о приложении запросов нет.
+        let paths: Vec<String> = api
+            .received_requests()
+            .await
+            .unwrap()
+            .iter()
+            .map(|r| r.url.path().to_owned())
+            .collect();
+        assert_eq!(paths, ["/oauth2/v3/token", "/api/publish/v2/app-info"]);
 
         client.cancel().await.unwrap();
         handle.await.unwrap();

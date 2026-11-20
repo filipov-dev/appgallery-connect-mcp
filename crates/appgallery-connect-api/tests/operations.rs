@@ -10,9 +10,10 @@ use appgallery_connect_api::spec::{
     ParamType, ResponseKind, SecretKind, excluded_operations, find, find_excluded, find_group,
     find_toolset, groups, operations, secret_field_names, toolsets,
 };
+use appgallery_connect_api::{ApiService, Region};
 use serde_json::{Value, json};
 
-const TOOLSETS: [&str; 8] = [
+const TOOLSETS: [&str; 11] = [
     "apps",
     "releases",
     "listing",
@@ -21,9 +22,12 @@ const TOOLSETS: [&str; 8] = [
     "products",
     "projects",
     "provisioning",
+    "remote-config",
+    "app-linking",
+    "purchases",
 ];
 
-const GROUPS: [&str; 8] = [
+const GROUPS: [&str; 13] = [
     "auth",
     "publishing",
     "upload",
@@ -32,6 +36,11 @@ const GROUPS: [&str; 8] = [
     "pms",
     "project",
     "provisioning",
+    "remoteconfig",
+    "applinking",
+    "orders",
+    "subscriptions",
+    "iapkit",
 ];
 
 /// Операции снимка по `operationId`: (метод, путь, операция).
@@ -79,10 +88,11 @@ fn default_access(method: &str) -> AccessLevel {
 
 #[test]
 fn totals() {
-    assert_eq!(spec_operations().len(), 61, "операций в paths снимка");
-    assert_eq!(operations().len(), 56, "инструментов");
-    // 7 исключённых в дополнении, из них 2 внешние (без пути) в таблицу не попадают.
-    assert_eq!(excluded_operations().len(), 5, "исключённых");
+    assert_eq!(spec_operations().len(), 87, "операций в paths снимка");
+    assert_eq!(operations().len(), 70, "инструментов");
+    // 19 исключённых в дополнении (из них 11 — REST API IAP Kit), 2 внешние (без пути) в
+    // таблицу не попадают.
+    assert_eq!(excluded_operations().len(), 17, "исключённых");
     assert_eq!(
         operations().len() + excluded_operations().len(),
         spec_operations().len()
@@ -96,7 +106,7 @@ fn totals() {
     }
     assert_eq!(
         by_access,
-        BTreeMap::from([("read", 28), ("write", 11), ("destructive", 17)])
+        BTreeMap::from([("read", 34), ("write", 12), ("destructive", 24)])
     );
     assert_eq!(
         by_toolset,
@@ -108,7 +118,10 @@ fn totals() {
             ("reports", 5),
             ("products", 15),
             ("projects", 8),
-            ("provisioning", 10),
+            ("provisioning", 9),
+            ("remote-config", 4),
+            ("app-linking", 2),
+            ("purchases", 9),
         ])
     );
 }
@@ -132,6 +145,11 @@ fn groups_and_toolsets_match_overlay() {
         .collect();
     assert_eq!(defaults, ["apps", "releases", "reviews"]);
     assert!(!find_toolset("provisioning").expect("набор").default_enabled);
+    assert!(
+        !find_toolset("remote-config")
+            .expect("набор")
+            .default_enabled
+    );
     for toolset in toolsets() {
         assert!(!toolset.description.is_empty(), "{}", toolset.slug);
         assert!(
@@ -159,7 +177,13 @@ fn every_spec_operation_is_kept_or_excluded() {
         let (method, path, raw) = &spec[op.operation_id];
         assert_eq!(op.method.as_str(), method, "{}", op.tool_name);
         assert_eq!(op.path, path, "{}", op.tool_name);
-        assert!(op.path.starts_with("/api/"), "{}", op.tool_name);
+        // Операции HMS IAP идут на хост своего сервиса: путь без `/api/`.
+        assert_eq!(
+            op.path.starts_with("/api/"),
+            !op.service.is_iap(),
+            "{}",
+            op.tool_name
+        );
         assert_eq!(op.summary, raw["summary"], "{}", op.tool_name);
         assert_eq!(op.reference, raw["x-agc-reference"], "{}", op.tool_name);
         assert_eq!(op.group, raw["x-agc-group"], "{}", op.tool_name);
@@ -284,6 +308,21 @@ fn access_levels() {
         ("provisioning.cert.delete", AccessLevel::Destructive),
         ("provisioning.profile.delete", AccessLevel::Destructive),
         ("provisioning.profile.create", AccessLevel::Write),
+        ("remoteconfig.config.get", AccessLevel::Read),
+        ("remoteconfig.version.list", AccessLevel::Read),
+        ("remoteconfig.config.update", AccessLevel::Destructive),
+        ("remoteconfig.config.rollback", AccessLevel::Destructive),
+        ("applinking.link.create", AccessLevel::Write),
+        ("applinking.unifiedLink.create", AccessLevel::Write),
+        ("orders.purchaseToken.verify", AccessLevel::Read),
+        ("orders.purchase.confirm", AccessLevel::Destructive),
+        ("orders.cancelledPurchase.list", AccessLevel::Read),
+        ("orders.merchantOrder.list", AccessLevel::Read),
+        ("subscriptions.purchase.get", AccessLevel::Read),
+        ("subscriptions.purchase.stop", AccessLevel::Destructive),
+        ("subscriptions.purchase.delay", AccessLevel::Destructive),
+        ("subscriptions.purchase.returnFee", AccessLevel::Destructive),
+        ("subscriptions.purchase.withdraw", AccessLevel::Destructive),
     ] {
         assert_eq!(by_id(id).access, level, "{id}");
     }
@@ -487,7 +526,7 @@ fn secret_fields_of_responses() {
         .filter(|op| op.saves_file())
         .map(|op| op.operation_id)
         .collect();
-    assert_eq!(savable.len(), 11, "{savable:?}");
+    assert_eq!(savable.len(), 10, "{savable:?}");
     assert!(!savable.contains("project.appExtraInfo.get"));
     assert!(savable.contains("project.configFile.get"));
     assert_eq!(
@@ -534,6 +573,7 @@ fn snapshot_view(op: &OperationDef) -> Value {
         "method": op.method.as_str(),
         "path": op.path,
         "access": op.access.as_str(),
+        "auth_modes": op.auth_modes.iter().map(|mode| mode.as_str()).collect::<Vec<_>>(),
         "params": params,
         "body": op.body.map(|kind| format!("{kind:?}")),
         "response": format!("{:?}", op.response),
@@ -545,6 +585,10 @@ fn snapshot_view(op: &OperationDef) -> Value {
         "reference": op.reference,
         "input_schema": schema(op),
     });
+    // Клиент проекта — только у операций сервисов проекта: остальные снапшоты не меняются.
+    if let Some(param) = op.project_param {
+        view["project_param"] = json!(param);
+    }
     // Секретные поля — только у операций, где они есть: остальные снапшоты не меняются.
     if !op.secrets.is_empty() {
         view["secrets"] = op
@@ -560,7 +604,37 @@ fn snapshot_view(op: &OperationDef) -> Value {
             })
             .collect();
     }
+    // Сервис, разбираемые строки и убранные поля — только у операций HMS IAP.
+    if op.service.is_iap() {
+        view["service"] = json!(op.service.slug());
+        view["json_strings"] = json!(op.json_strings);
+        view["omitted"] = op
+            .omitted
+            .iter()
+            .map(|field| json!({"path": field.path, "reason": field.reason}))
+            .collect();
+    }
     view
+}
+
+#[test]
+fn auth_modes_follow_the_reference() {
+    use appgallery_connect_api::AuthMode;
+    let comments: Vec<_> = operations()
+        .iter()
+        .filter(|op| op.group == "comments")
+        .collect();
+    assert!(!comments.is_empty());
+    for op in comments {
+        assert!(op.supports_auth(AuthMode::ApiClient), "{}", op.tool_name);
+        assert!(!op.supports_auth(AuthMode::OAuthClient), "{}", op.tool_name);
+    }
+    let teams = appgallery_connect_api::spec::find("list_teams").expect("list_teams");
+    assert_eq!(teams.auth_modes, &[AuthMode::OAuthClient]);
+    for op in operations().iter().filter(|op| op.group == "publishing") {
+        assert!(op.supports_auth(AuthMode::OAuthClient), "{}", op.tool_name);
+        assert!(op.supports_auth(AuthMode::ApiClient), "{}", op.tool_name);
+    }
 }
 
 fn excluded_view(ex: &ExcludedOperationDef) -> Value {
@@ -634,8 +708,240 @@ fn snapshot_list_profiles() {
 }
 
 #[test]
+fn snapshot_list_certificates() {
+    // POST с уровнем чтения, две ссылки на файл сертификата (`certInfo` и `certList`).
+    snapshot!("list_certificates");
+}
+
+#[test]
+fn snapshot_delete_certificates() {
+    // POST с уровнем удаления и причиной в описании.
+    snapshot!("delete_certificates");
+}
+
+#[test]
+fn snapshot_create_short_link() {
+    // Сервис проекта: заголовок `productId` выбирает API-клиент проекта; вложенные модели
+    // ссылки в теле.
+    snapshot!("create_short_link");
+}
+
+#[test]
+fn app_linking_operations_use_the_project_client() {
+    for name in ["create_short_link", "create_unified_link"] {
+        let op = op(name);
+        assert_eq!(op.toolset, "app-linking", "{name}");
+        assert_eq!(op.group, "applinking", "{name}");
+        assert_eq!(op.access, AccessLevel::Write, "{name}");
+        assert_eq!(op.project_param, Some("productId"), "{name}");
+        assert!(op.needs_project_credentials(), "{name}");
+        let product = op
+            .params
+            .iter()
+            .find(|p| p.name == "productId")
+            .expect("productId");
+        assert_eq!(product.location, ParamLocation::Header, "{name}");
+        assert!(product.required, "{name}");
+        // Описание предупреждает: ссылки не видны в консоли и не удаляются через API.
+        assert!(
+            op.description.contains("not shown in AppGallery Connect"),
+            "{name}"
+        );
+        assert!(
+            op.description.contains("cannot list, change or delete"),
+            "{name}"
+        );
+        assert!(
+            op.description.contains("Project-level API client"),
+            "{name}"
+        );
+    }
+    assert!(!find_toolset("app-linking").expect("набор").default_enabled);
+    // Клиент проекта нужен только App Linking и Remote Configuration, остальным — клиент
+    // команды.
+    for op in operations() {
+        assert_eq!(
+            op.project_param.is_some(),
+            matches!(op.group, "applinking" | "remoteconfig"),
+            "{}",
+            op.tool_name
+        );
+    }
+}
+
+#[test]
+fn snapshot_verify_product_purchase() {
+    // HMS IAP: хост сервиса заказов, аргумент `appId` секрета приложения, корневой
+    // конверт `responseCode`, JSON-строка в ответе и убранная подпись.
+    snapshot!("verify_product_purchase");
+}
+
+#[test]
+fn snapshot_refund_subscription() {
+    // HMS IAP: сервис подписок, POST с уровнем удаления и причиной.
+    snapshot!("refund_subscription");
+}
+
+#[test]
+fn iap_operations_parse_purchase_data_and_drop_signatures() {
+    let iap: Vec<&OperationDef> = operations()
+        .iter()
+        .filter(|op| op.service.is_iap())
+        .collect();
+    assert_eq!(iap.len(), 9);
+    for op in &iap {
+        assert_eq!(op.toolset, "purchases", "{}", op.tool_name);
+        assert_eq!(
+            op.params[0].location,
+            ParamLocation::Credential,
+            "{}",
+            op.tool_name
+        );
+        assert_eq!(op.result.map(|r| r.field), Some(""), "{}", op.tool_name);
+    }
+    let parsed: BTreeMap<&str, Vec<&str>> = iap
+        .iter()
+        .filter(|op| !op.json_strings.is_empty())
+        .map(|op| (op.tool_name, op.json_strings.to_vec()))
+        .collect();
+    assert_eq!(
+        parsed,
+        BTreeMap::from([
+            ("get_subscription_purchase", vec!["inappPurchaseData"]),
+            ("list_cancelled_purchases", vec!["cancelledPurchaseList"]),
+            ("verify_product_purchase", vec!["purchaseTokenData"]),
+        ])
+    );
+    for name in ["get_subscription_purchase", "verify_product_purchase"] {
+        let omitted: Vec<&str> = op(name).omitted.iter().map(|f| f.path).collect();
+        assert_eq!(omitted, ["dataSignature", "signatureAlgorithm"], "{name}");
+        assert!(
+            op(name).description.contains("The server removes"),
+            "{name}"
+        );
+    }
+    // У операций AppGallery Connect API ответ не меняется.
+    assert!(
+        operations()
+            .iter()
+            .filter(|op| !op.service.is_iap())
+            .all(|op| op.json_strings.is_empty() && op.omitted.is_empty())
+    );
+}
+
+#[test]
 fn snapshot_excluded_operations() {
-    // Получение токена (группа `auth`) и шаги загрузки (группа `upload`).
+    // Получение токена (группа `auth`), шаги загрузки (группа `upload`), запрос
+    // сертификата по CSR строкой (группа `provisioning`) и REST API IAP Kit (группа
+    // `iapkit`).
     let excluded: Vec<Value> = excluded_operations().iter().map(excluded_view).collect();
     insta::assert_json_snapshot!("excluded_operations", excluded);
+}
+
+#[test]
+fn iap_kit_operations_are_found_but_not_callable() {
+    // REST API IAP Kit (HarmonyOS 5+): подписи JWT ES256 и проверки JWS в сервере нет.
+    let iap_kit: Vec<&ExcludedOperationDef> = excluded_operations()
+        .iter()
+        .filter(|op| op.group == "iapkit")
+        .collect();
+    assert_eq!(iap_kit.len(), 11);
+    for op in &iap_kit {
+        assert!(!op.callable, "{}", op.operation_id);
+        assert_eq!(op.toolset, "", "{}", op.operation_id);
+        assert!(op.note.contains("ES256 JWT"), "{}", op.operation_id);
+        assert!(
+            op.alternative.contains("purchases toolset"),
+            "{}",
+            op.operation_id
+        );
+    }
+    assert_eq!(
+        find_excluded("iapkit.refundResult.send").map(|op| op.access),
+        Some(AccessLevel::Destructive)
+    );
+    assert_eq!(
+        find_excluded("iapkit.orderStatus.query").map(|op| op.access),
+        Some(AccessLevel::Read)
+    );
+    assert_eq!(
+        ApiService::IapKit.host(Region::Ru),
+        "iap.cloud.huawei.com",
+        "справочник называет только площадку Китая"
+    );
+}
+
+#[test]
+fn certificate_request_operation_is_closed() {
+    // CSR передаётся строкой в теле: операцию вызывает только составной
+    // `certificate_request`, который читает CSR из файла.
+    let op = find_excluded("provisioning.cert.create").expect("исключена");
+    assert!(!op.callable);
+    assert_eq!(op.toolset, "provisioning");
+    assert_eq!(op.access, AccessLevel::Write);
+    assert!(op.alternative.contains("certificate_request"));
+    assert!(
+        operations()
+            .iter()
+            .all(|o| o.tool_name != "create_certificate")
+    );
+    // Остальные операции набора — инструменты: 3 чтения, 3 записи, 3 удаления.
+    let mut levels = BTreeMap::new();
+    for op in operations()
+        .iter()
+        .filter(|op| op.toolset == "provisioning")
+    {
+        *levels.entry(op.access.as_str()).or_insert(0) += 1;
+    }
+    assert_eq!(
+        levels,
+        BTreeMap::from([("read", 3), ("write", 3), ("destructive", 3)])
+    );
+}
+
+#[test]
+fn snapshot_update_remote_config() {
+    // Remote Configuration: PUT с уровнем удаления, заголовки productId и appId, клиент
+    // проекта по productId.
+    snapshot!("update_remote_config");
+}
+
+#[test]
+fn remote_config_operations_use_the_project_client() {
+    // Все четыре операции набора подписывает API-клиент проекта из заголовка productId;
+    // остальные операции таблицы — клиент команды.
+    let remote: Vec<&OperationDef> = operations()
+        .iter()
+        .filter(|op| op.toolset == "remote-config")
+        .collect();
+    assert_eq!(
+        remote.iter().map(|op| op.tool_name).collect::<Vec<_>>(),
+        [
+            "get_remote_config",
+            "list_remote_config_versions",
+            "rollback_remote_config",
+            "update_remote_config"
+        ]
+    );
+    for op in &remote {
+        assert_eq!(op.group, "remoteconfig", "{}", op.tool_name);
+        assert_eq!(op.project_param, Some("productId"), "{}", op.tool_name);
+        assert!(op.needs_project_credentials());
+        for name in ["productId", "appId"] {
+            let param = op
+                .param(name)
+                .unwrap_or_else(|| panic!("{}: {name}", op.tool_name));
+            assert_eq!(param.location, ParamLocation::Header, "{name}");
+            assert!(param.required, "{name}");
+        }
+        assert!(
+            op.description.contains("Project-level API client"),
+            "{}",
+            op.tool_name
+        );
+        let result = op.result.expect("конверт");
+        assert_eq!((result.field, result.code_field), ("ret", "code"));
+    }
+    // Что клиент проекта нужен только Remote Configuration и App Linking, проверяет
+    // `app_linking_operations_use_the_project_client`.
 }

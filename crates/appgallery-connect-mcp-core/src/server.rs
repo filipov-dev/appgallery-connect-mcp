@@ -12,7 +12,8 @@
 //! и `save_to` (путь проверяется [`FilePolicy`] до запроса; вместе с `jq` — ошибка) →
 //! проверка аргументов по схеме ([`check_operation_arguments`]) → запрос (путь, query,
 //! заголовки, тело, конверт результата — исполнитель) → сохранение файла из ответа, если
-//! передан `save_to` → вырезание секретов: поля операции по таблице спецификации, поля по
+//! передан `save_to` → разбор JSON-строк и удаление полей ответа по таблице
+//! ([`crate::decode`], HMS IAP) → вырезание секретов: поля операции по таблице спецификации, поля по
 //! имени, значения по виду ([`crate::redact`]) → фильтр `jq` ([`crate::jq::apply`]) →
 //! обёртка с пометкой `note` о вырезанном (и `saved` о сохранённом файле) → лимит размера.
 //! Ошибки API, конверта результата и сети — `CallToolResult` с `isError: true`, их текст
@@ -36,6 +37,11 @@
 //! `api_request` собирает запрос в [`crate::request`] и дальше идёт тем же путём, что и
 //! инструмент операции: исполнитель, вырезание секретов (если путь — операция таблицы, то и
 //! её секретных полей), `jq`, `note`, лимит размера. `save_to` у него нет.
+//!
+//! Промпты ([`crate::prompts`]): `prompts/list` отдаёт промпты, доступные при уровне доступа
+//! сервера, `prompts/get` рендерит текст по уровню доступа, режиму наборов, наборам текущего
+//! реестра сессии и приложениям профиля. Capability `prompts` объявляется, только если есть
+//! хотя бы один доступный промпт.
 
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, RwLock};
@@ -53,7 +59,8 @@ use rmcp::service::{RequestContext, SubscriptionContext};
 use rmcp::{ErrorData, RoleServer, ServerHandler};
 use serde_json::{Map, Value, json};
 
-use crate::composite::{Context, NoVault, ProfileInfo, SecretVault};
+use crate::composite::{Context, HttpNoVault, NoVault, ProfileInfo, SecretVault};
+use crate::decode::{join_notes, reshape_operation_json};
 use crate::error::ToolError;
 use crate::files::{FilePolicy, display_path, take_save_to, write_file_content};
 use crate::jq::{FILTER_INPUT_LIMIT, JqFilter, take_jq, takes_jq};
@@ -61,7 +68,9 @@ use crate::redact::{Redactions, redact_json, redact_operation_json, redact_text,
 use crate::registry::{ToolKind, ToolRegistry, access_name};
 use crate::response::{NOTE, SAVED, empty_response, failure, note_extra, success, wrap};
 use crate::validate::{check_arguments, check_operation_arguments};
-use crate::{DEFAULT_PROFILE_NAME, ServerOptions, jq, request, search, server_name, toolsets};
+use crate::{
+    DEFAULT_PROFILE_NAME, ServerOptions, jq, prompts, request, search, server_name, toolsets,
+};
 
 /// Клиенты и хранилища, с которыми работает сервер.
 pub struct Services {
@@ -148,13 +157,30 @@ impl AppGalleryServer {
     /// некорректные составные инструменты или недоступный каталог `--allow-path`.
     ///
     /// Локальные файлы — рабочий каталог, временный каталог и
-    /// [`ServerOptions::allowed_paths`] ([`FilePolicy::with_defaults`]).
+    /// [`ServerOptions::allowed_paths`] ([`FilePolicy::with_defaults`]); в HTTP-режиме —
+    /// только [`ServerOptions::allowed_paths`] ([`http_file_policy`]).
     pub fn new(services: Services, options: ServerOptions) -> Result<Self, String> {
         let registry = Arc::new(ToolRegistry::new(&options)?);
-        let files = FilePolicy::with_defaults(&options.allowed_paths).map_err(|err| err.0)?;
-        let region = services.api.config().region;
-        let mut instructions = server_instructions(&options, &registry, region);
+        let files = if options.http {
+            http_file_policy(&options.allowed_paths)
+        } else {
+            FilePolicy::with_defaults(&options.allowed_paths)
+        }
+        .map_err(|err| err.0)?;
+        let config = services.api.config();
+        let region = config.region;
+        // Вход пользователя: инструкции называют команду и `auth login --oauth`.
+        let team = config
+            .oauth
+            .as_ref()
+            .map(|session| session.team_id.clone().unwrap_or_default());
+        let mut instructions = server_instructions(&options, &registry, region, team.as_deref());
         instructions.push_str(&files_instructions(&options, &registry, &files));
+        instructions.push_str(&crate::purchases::purchases_instructions(
+            &options,
+            &registry,
+            &services.api.app_ids(),
+        ));
         let profile = options
             .profile
             .clone()
@@ -162,13 +188,20 @@ impl AppGalleryServer {
         let context = Arc::new(Context {
             api: Arc::new(services.api),
             files: Arc::new(files.clone()),
-            vault: services.vault,
+            // В HTTP-режиме хранилища секретов нет при любом `Services`: сервер удалённый и
+            // общий, сохранять секреты клиентов ему негде и незачем.
+            vault: if options.http {
+                Arc::new(HttpNoVault)
+            } else {
+                services.vault
+            },
             profile: ProfileInfo {
                 name: profile.clone(),
                 apps: options.apps.clone(),
                 packages: options.packages.clone(),
             },
             access: options.max_access,
+            http: options.http,
         });
         Ok(Self {
             inner: Arc::new(Inner {
@@ -305,6 +338,8 @@ impl AppGalleryServer {
             ));
         }
         check_operation_arguments(op, schema, &mut args)?;
+        // Тело записи Remote Configuration с маской `***` затёрло бы настоящие значения.
+        crate::composite::remote_config_set::guard_masked_body(op, args.get("body"))?;
         // Путь проверяется до запроса: ошибка в пути не должна стоить вызова API (а у
         // операций записи — изменения данных).
         let target = match save_to.as_deref() {
@@ -341,10 +376,11 @@ impl AppGalleryServer {
             Some(_) => FILTER_INPUT_LIMIT.max(client.config().max_response_bytes),
             None => client.config().max_response_bytes,
         };
+        let http = self.registry().http();
         client
             .execute_with_limit(request, limit)
             .await
-            .map_err(|err| api_error(op, err))
+            .map_err(|err| api_error(op, err, http))
     }
 
     /// Пользовательский инструмент: фиксированные аргументы и фильтр определения, дальше —
@@ -369,7 +405,8 @@ impl AppGalleryServer {
     async fn call_api_request(&self, mut args: JsonObject) -> Result<String, ToolError> {
         // Фильтр проверяется до запроса, как у инструментов операций.
         let jq = jq::take_jq(&mut args)?;
-        let prepared = request::prepare(&args, self.registry().max_access())?;
+        let prepared =
+            request::prepare(&args, self.registry().max_access(), self.registry().http())?;
         tracing::debug!(
             method = prepared.request.method.as_str(),
             path = %prepared.request.path,
@@ -378,6 +415,12 @@ impl AppGalleryServer {
             "произвольный запрос к AppGallery Connect API"
         );
         let op = prepared.operation();
+        if let Some(op) = op {
+            crate::composite::remote_config_set::guard_masked_body(
+                op,
+                prepared.request.body.as_ref(),
+            )?;
+        }
         let response = self.execute(prepared.request, jq.as_ref(), op).await?;
         self.finish(
             op,
@@ -554,7 +597,8 @@ impl AppGalleryServer {
     }
 
     /// Текст успешного ответа для агента — общая постобработка всех инструментов, которые
-    /// вызывают API: вырезание секретов → фильтр `jq` → обёртка с `note` → лимит размера.
+    /// вызывают API: разбор JSON-строк и удаление полей по таблице ([`crate::decode`]) →
+    /// вырезание секретов → фильтр `jq` → обёртка с `note` → лимит размера.
     /// `op` — операция таблицы, если запрос — она: тогда до фильтра скрываются и её секретные
     /// поля по таблице спецификации. `changes` — запрос изменяет данные: тогда ошибка
     /// фильтра или размера говорит, что изменение выполнено.
@@ -568,6 +612,9 @@ impl AppGalleryServer {
         let status = changes.then_some(response.status);
         let text = match response.body {
             ResponseBody::Json(mut value) => {
+                let changes = op
+                    .map(|op| reshape_operation_json(op, &mut value))
+                    .unwrap_or_default();
                 let redactions = match op {
                     Some(op) => redact_operation_json(op, &mut value, None, &|text| {
                         self.client().scrub(text)
@@ -575,7 +622,8 @@ impl AppGalleryServer {
                     None => self.redact(&mut value),
                 };
                 let value = self.filter(value, jq, status).await?;
-                wrap(value, note_extra(redactions.note())).to_string()
+                let note = join_notes(changes.note(), redactions.note());
+                wrap(value, note_extra(note)).to_string()
             }
             ResponseBody::Text(text) => {
                 let client = self.client();
@@ -638,10 +686,11 @@ fn savable_names(op: &OperationDef) -> String {
 }
 
 /// Ошибка исполнителя для агента; к ошибке размера ответа добавляется подсказка, какими
-/// аргументами операции сузить запрос.
-fn api_error(op: Option<&OperationDef>, err: ApiError) -> ToolError {
+/// аргументами операции сузить запрос. `http` — HTTP-режим сервера
+/// ([`crate::error::describe_api_error_for`]).
+fn api_error(op: Option<&OperationDef>, err: ApiError, http: bool) -> ToolError {
     let too_large = matches!(err, ApiError::ResponseTooLarge { .. });
-    let mut error = ToolError::from(err);
+    let mut error = ToolError::new(crate::error::describe_api_error_for(&err, http));
     if too_large && let Some(hint) = op.and_then(narrowing_arguments) {
         error.message.push_str(". ");
         error.message.push_str(&hint);
@@ -707,7 +756,8 @@ fn check_size(
 
 impl ServerHandler for AppGalleryServer {
     fn get_info(&self) -> ServerConfig {
-        let capabilities = if self.inner.options.dynamic_toolsets {
+        let options = &self.inner.options;
+        let mut capabilities = if options.dynamic_toolsets {
             ServerCapabilities::builder()
                 .enable_tools()
                 .enable_tool_list_changed()
@@ -715,6 +765,12 @@ impl ServerHandler for AppGalleryServer {
         } else {
             ServerCapabilities::builder().enable_tools().build()
         };
+        if prompts::available(&options.prompts, options.max_access)
+            .next()
+            .is_some()
+        {
+            capabilities.prompts = Some(rmcp::model::PromptsCapability::default());
+        }
         ServerConfig::new(capabilities)
             .with_server_info(
                 Implementation::new(self.inner.name.clone(), env!("CARGO_PKG_VERSION"))
@@ -729,6 +785,35 @@ impl ServerHandler for AppGalleryServer {
         _context: RequestContext<RoleServer>,
     ) -> Result<ListToolsResult, ErrorData> {
         Ok(ListToolsResult::with_all_items(self.registry().tools()))
+    }
+
+    async fn list_prompts(
+        &self,
+        _request: Option<PaginatedRequestParams>,
+        _context: RequestContext<RoleServer>,
+    ) -> Result<rmcp::model::ListPromptsResult, ErrorData> {
+        let options = &self.inner.options;
+        let prompts = prompts::available(&options.prompts, options.max_access).map(prompts::info);
+        Ok(rmcp::model::ListPromptsResult::with_all_items(
+            prompts.collect(),
+        ))
+    }
+
+    async fn get_prompt(
+        &self,
+        request: rmcp::model::GetPromptRequestParams,
+        _context: RequestContext<RoleServer>,
+    ) -> Result<rmcp::model::GetPromptResponse, ErrorData> {
+        let options = &self.inner.options;
+        let registry = self.registry();
+        let setup = prompts::PromptSetup {
+            access: options.max_access,
+            dynamic: registry.is_dynamic(),
+            enabled_toolsets: registry.enabled_toolsets().to_vec(),
+            apps: options.apps.clone(),
+            http: options.http,
+        };
+        prompts::get(&options.prompts, &setup, request).map(Into::into)
     }
 
     async fn call_tool(
@@ -799,6 +884,20 @@ fn uses_legacy_session(context: &RequestContext<RoleServer>) -> bool {
         .is_none_or(|version| version.as_str() < ProtocolVersion::V_2026_07_28.as_str())
 }
 
+/// Локальные файлы HTTP-сервера: только каталоги сервера из `--allow-path`, относительные
+/// пути — от первого из них. Рабочий и временный каталоги сервера к клиенту отношения не
+/// имеют; без каталогов файлов нет ([`FilePolicy::disabled`]).
+pub fn http_file_policy(allowed: &[PathBuf]) -> Result<FilePolicy, crate::files::FilePolicyError> {
+    if allowed.is_empty() {
+        return Ok(FilePolicy::disabled());
+    }
+    let policy = FilePolicy::new(allowed)?;
+    Ok(match policy.roots().first().cloned() {
+        Some(base) => policy.with_base_dir(base),
+        None => policy,
+    })
+}
+
 /// Составной инструмент поиска приложений: инструкции советуют его, если он есть.
 const SEARCH_APPS: &str = crate::composite::search_apps::NAME;
 
@@ -807,6 +906,7 @@ pub fn server_instructions(
     options: &ServerOptions,
     registry: &ToolRegistry,
     region: Region,
+    team: Option<&str>,
 ) -> String {
     let profile = options.profile.as_deref().unwrap_or(DEFAULT_PROFILE_NAME);
     let enabled = registry.enabled_toolsets();
@@ -889,17 +989,14 @@ pub fn server_instructions(
     format!(
         "AppGallery Connect MCP server ({level} access). Every operation tool calls one Huawei \
          AppGallery Connect API operation (Publishing, Comments, Reports, PMS, Project \
-         Management, Provisioning) and returns its JSON response. This server works as one \
-         AppGallery Connect API client of one developer account: the profile `{profile}`. \
-         For another account the user starts another server with another profile. \
+         Management, Provisioning, Remote Configuration) and returns its JSON response. {account} \
          {toolsets}\n\
          \n\
          - Access: {access}\n\
          - Region: the profile works with the AppGallery Connect site `{region_slug}` \
          ({region_title}, `{host}`). Apps of accounts on another site are not visible here: \
          if an app the user names is not found, ask whether the account is on another site \
-         (China, Germany, Singapore or Russia); the region is changed with \
-         `appgallery-connect-mcp auth login --profile {profile} --region <cn|de|sg|ru>`.\n\
+         (China, Germany, Singapore or Russia); {region_change}\n\
          - Apps: tools address an app by its numeric app ID (`appId`, like `100000001`; \
          AppGallery Connect shows it in My apps > the app > App information), not by the \
          package name. `list_app_ids` returns the app IDs for package names (`packageName`); \
@@ -944,25 +1041,22 @@ pub fn server_instructions(
          successful tool result means the result code was 0. HTTP 401 and 403 and \
          permission codes mean that the API client lacks a role or the app belongs to another \
          account: tell the user what to check instead of retrying.\n\
-         - Projects: the Huawei reference describes the Project Management API (toolset \
-         `projects`: teams, projects, services, the app configuration file, certificate \
-         fingerprints) only for OAuth clients and service accounts. With the API client of \
-         this server these operations may fail with a permission error; then tell the user \
-         and use the Publishing API tools instead.\n\
+         {projects}\n\
+         - Remote Configuration (toolset `remote-config`): requests are signed with the \
+         project-level API client of the project in `productId` (the project ID), not with \
+         the team-level API client; when it is missing, the error says what the user has to \
+         run. A new version takes effect for the users of the app at once: change parameters \
+         with `remote_config_set`, show its dry run to the user and write only after they \
+         confirm. Never send values hidden as \"***\" back to the API.\n\
          - Uploads: the upload steps of the Upload Management API are not available as tools \
          or calls: their responses are one-time upload URLs and authorization headers.\
          {composite}\n\
          - Large responses are rejected with an error; narrow the request (a smaller page, \
          stricter filters, fewer languages) or select less with `jq`.\n\
-         - Secrets: the API client ID and secret of the profile are kept in the system \
-         keychain and the access token only in the server's memory; they are used only by \
-         the server and are never passed in tool arguments. Never ask the user to paste \
+         - Secrets: {credentials} Never ask the user to paste \
          client secrets, tokens, `agc-apiclient-*.json` or `agconnect-services.json` files \
-         into the conversation, and never write them to files, commits or messages. If \
-         getting a token fails or the API rejects it (HTTP 401), ask the user to check the \
-         profile with `appgallery-connect-mcp auth status --profile {profile} --check` and to \
-         sign in again with `appgallery-connect-mcp auth login --profile {profile}` \
-         themselves. Values that look like credentials (client and app secrets, access \
+         into the conversation, and never write them to files, commits or messages. \
+         {rejected} Values that look like credentials (client and app secrets, access \
          tokens, API keys, upload codes and URLs, authorization headers, private keys, signed \
          URLs) are replaced with \"***\" in every response, including errors, and a `note` \
          says what was hidden and why. Some responses are mostly secret: the app secret \
@@ -974,7 +1068,12 @@ pub fn server_instructions(
          - Personal data: reviews contain data of real users; use it only for the task at \
          hand.",
         level = access_name(options.max_access),
-        access = access_text(options.max_access),
+        access = access_text(options.max_access, options.http),
+        account = account_text(options.http, profile, team),
+        region_change = region_change_text(options.http, profile, team),
+        credentials = credentials_text(options.http, team),
+        rejected = rejected_text(options.http, profile, team),
+        projects = projects_text(team),
         region_slug = region.slug(),
         region_title = region.title(),
         host = region.host(),
@@ -1018,6 +1117,9 @@ pub fn files_instructions(
             _ => false,
         })
     };
+    if options.http {
+        return http_files_instructions(files, saves);
+    }
     if !saves {
         return String::new();
     }
@@ -1031,10 +1133,173 @@ pub fn files_instructions(
     )
 }
 
-/// Уровень доступа для инструкций.
-fn access_text(level: AccessLevel) -> &'static str {
-    match level {
-        AccessLevel::Read => {
+/// Раздел о локальных файлах HTTP-сервера: файлы клиента серверу недоступны, файловые
+/// аргументы — пути в каталогах сервера из `--allow-path`, без них — ни одного.
+fn http_files_instructions(files: &FilePolicy, saves: bool) -> String {
+    if files.is_disabled() {
+        return "\n- Local files: this server runs remotely over HTTP and has no file directory: \
+                tools that need files (package uploads, listing export and import, image sync, \
+                saving the app configuration file) are not registered, and `save_to` is \
+                rejected. Hidden values stay hidden."
+            .to_owned();
+    }
+    let save_to = if saves {
+        " `save_to` cannot be combined with `jq`."
+    } else {
+        ""
+    };
+    format!(
+        "\n- Local files: this server runs remotely over HTTP. File arguments (`save_to`, the \
+         files and directories of composite tools) are paths on the server, not on the user's \
+         machine (relative paths start in the first directory), inside: {}. Other paths are \
+         rejected; the server operator copies files in and out of these directories. Existing \
+         files are never overwritten, and the parent directory must exist. Files are \
+         downloaded only from Huawei hosts.{save_to}",
+        files.describe_roots()
+    )
+}
+
+/// Чей вход у сервера: API-клиент или пользователь HUAWEI ID в команде `team` (режим
+/// OAuth-клиента); профиль пользователя (stdio) или учётные данные оператора сервера (HTTP).
+fn account_text(http: bool, profile: &str, team: Option<&str>) -> String {
+    match (http, team) {
+        (true, None) => "This server runs remotely over HTTP and works as one AppGallery Connect \
+                         API client of one developer account, set up by the server operator."
+            .to_owned(),
+        (true, Some(team)) => format!(
+            "This server runs remotely over HTTP and works as a HUAWEI ID user signed in \
+             through an OAuth client, in the team `{team}` of one developer account, with the \
+             permissions of that user's role there; the sign-in is set up by the server \
+             operator."
+        ),
+        (false, None) => format!(
+            "This server works as one AppGallery Connect API client of one developer account: \
+             the profile `{profile}`. For another account the user starts another server with \
+             another profile."
+        ),
+        (false, Some(team)) => format!(
+            "This server works as a HUAWEI ID user signed in through an OAuth client, in the \
+             team `{team}` of one developer account, with the permissions of the user's role \
+             there: the profile `{profile}`. For another team or account the user starts \
+             another server with another profile."
+        ),
+    }
+}
+
+/// Как сменить регион (сайт AppGallery Connect). У входа пользователя регион — сайт команды.
+fn region_change_text(http: bool, profile: &str, team: Option<&str>) -> String {
+    match (http, team) {
+        (true, _) => "the region of this server is set by the server operator.".to_owned(),
+        (false, None) => format!(
+            "the region is changed with `appgallery-connect-mcp auth login --profile {profile} \
+             --region <cn|de|sg|ru>`."
+        ),
+        (false, Some(_)) => format!(
+            "the region is the site of the team; the user chooses another team with \
+             `appgallery-connect-mcp auth login --oauth --profile {profile}`."
+        ),
+    }
+}
+
+/// Где учётные данные: API-клиента или входа пользователя.
+fn credentials_text(http: bool, team: Option<&str>) -> &'static str {
+    match (http, team.is_some()) {
+        (true, false) => {
+            "the API client ID and secret are kept on the server (set up by the server \
+             operator) and the access token only in the server's memory; they are used only by \
+             the server, never leave it and are never passed in tool arguments."
+        }
+        (true, true) => {
+            "the OAuth client and the refresh token of the user's sign-in are kept on the \
+             server (set up by the server operator) and the access token only in the server's \
+             memory; they are used only by the server, never leave it and are never passed in \
+             tool arguments."
+        }
+        (false, false) => {
+            "the API client ID and secret of the profile are kept in the system keychain and \
+             the access token only in the server's memory; they are used only by the server \
+             and are never passed in tool arguments."
+        }
+        (false, true) => {
+            "the OAuth client and the refresh token of the user's sign-in are kept in the \
+             system keychain and the access token only in the server's memory; they are used \
+             only by the server and are never passed in tool arguments."
+        }
+    }
+}
+
+/// Что делать, если токен не выпускается или API его отверг (HTTP 401).
+fn rejected_text(http: bool, profile: &str, team: Option<&str>) -> String {
+    match (http, team) {
+        (true, None) => "If getting a token fails or the API rejects it (HTTP 401), ask the \
+                         user to have the server operator check the API client of the server."
+            .to_owned(),
+        (true, Some(_)) => "If getting a token fails or the API rejects it (HTTP 401), the \
+                            user's sign-in has expired or was revoked: ask the user to have \
+                            the server operator sign in again."
+            .to_owned(),
+        (false, None) => format!(
+            "If getting a token fails or the API rejects it (HTTP 401), ask the user to check \
+             the profile with `appgallery-connect-mcp auth status --profile {profile} --check` \
+             and to sign in again with `appgallery-connect-mcp auth login --profile {profile}` \
+             themselves."
+        ),
+        (false, Some(_)) => format!(
+            "If getting a token fails or the API rejects it (HTTP 401), the sign-in has \
+             expired or was revoked: ask the user to check it with `appgallery-connect-mcp auth \
+             status --profile {profile} --check` and to sign in again with \
+             `appgallery-connect-mcp auth login --oauth --profile {profile}` themselves."
+        ),
+    }
+}
+
+/// Пункт о Project Management API и о том, чего нет при входе пользователя.
+fn projects_text(team: Option<&str>) -> &'static str {
+    match team {
+        Some(_) => {
+            "- Projects and sign-in: the Project Management API (toolset `projects`: teams, \
+             projects, services, the app configuration file, certificate fingerprints) works \
+             for the signed-in user. Operations that the Huawei reference describes only for \
+             API clients (the Comments API: reviews and replies) are refused before the \
+             request with an error that says so; tell the user that they need a server with an \
+             API client for them. Every call needs the API scope of its API (publish, \
+             report/read, product, develop, project) granted to the OAuth client and at \
+             sign-in: a permission or scope error means the sign-in needs more scopes \
+             (`--oauth-scope`) or Huawei has to approve them."
+        }
+        None => {
+            "- Projects: the Huawei reference describes the Project Management API (toolset \
+             `projects`: teams, projects, services, the app configuration file, certificate \
+             fingerprints) only for OAuth clients and service accounts. With the API client of \
+             this server these operations may fail with a permission error; then tell the user \
+             and use the Publishing API tools instead."
+        }
+    }
+}
+
+/// Уровень доступа для инструкций. В HTTP-режиме уровень задаёт токен доступа клиента
+/// (оператор сервера), а не флаги, которые пользователь передаёт при запуске.
+fn access_text(level: AccessLevel, http: bool) -> &'static str {
+    match (level, http) {
+        (AccessLevel::Read, true) => {
+            "This server is read-only for this access token: only tools that read data are \
+             available. Tools that change data (app information, localized listings, package \
+             files, certificate fingerprints, HarmonyOS certificates, devices and profiles) and \
+             tools that release to users, affect money or delete data (submitting for review, \
+             phased release and release time, public replies to reviews, products, prices and \
+             promotions, deleting) need an access token with a higher access level from the \
+             server operator. If a task needs them, ask the user instead of looking for \
+             workarounds."
+        }
+        (AccessLevel::Write, true) => {
+            "This server can read and change data with this access token, but not release, \
+             delete or affect money: submitting for review, phased release and release time, \
+             public replies to reviews, products, prices and promotions and deleting need an \
+             access token with the destructive level from the server operator. Changes of app \
+             information and listings before a submission stay invisible to users until the \
+             version is released."
+        }
+        (AccessLevel::Read, false) => {
             "This server is read-only: only tools that read data are available. Tools that \
              change data (app information, localized listings, package files, certificate \
              fingerprints, HarmonyOS certificates, devices and profiles) are enabled when the \
@@ -1044,14 +1309,14 @@ fn access_text(level: AccessLevel) -> &'static str {
              --allow-destructive. If a task needs them, ask the user instead of looking for \
              workarounds."
         }
-        AccessLevel::Write => {
+        (AccessLevel::Write, false) => {
             "This server can read and change data, but not release, delete or affect money: \
              submitting for review, phased release and release time, public replies to \
              reviews, products, prices and promotions and deleting need the user to start the \
              server with --allow-destructive. Changes of app information and listings before \
              a submission stay invisible to users until the version is released."
         }
-        AccessLevel::Destructive => {
+        (AccessLevel::Destructive, _) => {
             "This server can read, change, release and delete data. Submitting a version for \
              review releases it to AppGallery users after approval, replies to reviews are \
              public, product and promotion changes affect what users pay, and deleting is \
@@ -1067,7 +1332,43 @@ mod tests {
 
     fn instructions(options: &ServerOptions, region: Region) -> String {
         let registry = ToolRegistry::new(options).unwrap();
-        server_instructions(options, &registry, region)
+        server_instructions(options, &registry, region, None)
+    }
+
+    #[test]
+    fn instructions_name_the_team_of_a_user_sign_in() {
+        let options = ServerOptions {
+            profile: Some("guest".into()),
+            ..ServerOptions::default()
+        };
+        let registry = ToolRegistry::new(&options).unwrap();
+        let text = server_instructions(&options, &registry, Region::Ru, Some("7700"));
+        assert!(text.contains("team `7700`"), "{text}");
+        assert!(
+            text.contains("auth login --oauth --profile guest"),
+            "{text}"
+        );
+        assert!(text.contains("Comments API"), "{text}");
+        assert!(text.contains("Remote Configuration"), "{text}");
+        assert!(
+            !text.contains("one AppGallery Connect API client"),
+            "{text}"
+        );
+        let api = instructions(&options, Region::Ru);
+        assert!(!api.contains("--oauth"), "{api}");
+        assert!(api.contains("one AppGallery Connect API client"), "{api}");
+
+        // HTTP-режим: вход настраивает оператор, команд CLI агенту не называют.
+        let http = ServerOptions {
+            http: true,
+            ..options.clone()
+        };
+        let registry = ToolRegistry::new(&http).unwrap();
+        let text = server_instructions(&http, &registry, Region::Ru, Some("7700"));
+        assert!(text.contains("team `7700`"), "{text}");
+        assert!(text.contains("server operator sign in again"), "{text}");
+        assert!(!text.contains("auth login"), "{text}");
+        assert!(!text.contains("--profile"), "{text}");
     }
 
     #[test]
@@ -1191,6 +1492,96 @@ mod tests {
         );
         assert!(all.contains("(destructive access)"), "{all}");
         assert!(all.contains("irreversible"), "{all}");
+    }
+
+    #[test]
+    fn http_mode_has_no_secret_storage() {
+        let api =
+            || ApiClient::new(appgallery_connect_api::ClientConfig::new(Region::Cn, None)).unwrap();
+        let vault = Arc::new(crate::composite::MemoryVault::default());
+        let options = ServerOptions {
+            http: true,
+            ..ServerOptions::default()
+        };
+        let server =
+            AppGalleryServer::new(Services::new(api()).with_vault(vault.clone()), options).unwrap();
+        let err = server
+            .inner
+            .context
+            .vault
+            .store("app", "value")
+            .unwrap_err();
+        let message = err.message();
+        assert!(message.contains("HTTP mode"), "{message}");
+        assert!(message.contains("not available"), "{message}");
+        assert!(!message.contains("keychain"), "{message}");
+        assert!(vault.value("app").is_none());
+
+        // В stdio — хранилище, которое передал бинарник.
+        let server = AppGalleryServer::new(
+            Services::new(api()).with_vault(vault.clone()),
+            ServerOptions::default(),
+        )
+        .unwrap();
+        server.inner.context.vault.store("app", "value").unwrap();
+        assert_eq!(vault.value("app").as_deref(), Some("value"));
+    }
+
+    #[test]
+    fn instructions_for_http_mode() {
+        let http = |level, allowed: Vec<PathBuf>| {
+            let options = ServerOptions {
+                max_access: level,
+                profile: Some("ci".into()),
+                allowed_paths: allowed,
+                http: true,
+                ..ServerOptions::default()
+            };
+            let registry = ToolRegistry::new(&options).unwrap();
+            let files = http_file_policy(&options.allowed_paths).unwrap();
+            let mut text = server_instructions(&options, &registry, Region::Cn, None);
+            text.push_str(&files_instructions(&options, &registry, &files));
+            text
+        };
+        let read = http(AccessLevel::Read, Vec::new());
+        assert!(read.contains("runs remotely over HTTP"), "{read}");
+        assert!(read.contains("server operator"), "{read}");
+        assert!(read.contains("kept on the server"), "{read}");
+        assert!(read.contains("has no file directory"), "{read}");
+        // Флаги запуска, профиль и команды CLI к пользователю HTTP-сервера не относятся.
+        assert!(!read.contains("--allow-write"), "{read}");
+        assert!(!read.contains("auth login"), "{read}");
+        assert!(!read.contains("auth status"), "{read}");
+        assert!(!read.contains("system keychain"), "{read}");
+        assert!(!read.contains("the profile `ci`"), "{read}");
+        let write = http(AccessLevel::Write, Vec::new());
+        assert!(write.contains("destructive level"), "{write}");
+        assert!(!write.contains("--allow-destructive"), "{write}");
+
+        let dir = tempfile::tempdir().unwrap();
+        let with_files = http(AccessLevel::Write, vec![dir.path().to_path_buf()]);
+        assert!(with_files.contains("paths on the server"), "{with_files}");
+        assert!(!with_files.contains("--allow-path"), "{with_files}");
+        assert!(!with_files.contains("working directory"), "{with_files}");
+    }
+
+    #[test]
+    fn http_file_policy_uses_only_allowed_paths() {
+        let disabled = http_file_policy(&[]).unwrap();
+        assert!(disabled.is_disabled());
+        assert!(disabled.check_write("report.csv").is_err());
+
+        let dir = tempfile::tempdir().unwrap();
+        let policy = http_file_policy(&[dir.path().to_path_buf()]).unwrap();
+        assert_eq!(policy.roots().len(), 1);
+        // Относительный путь — от каталога сервера, а не от рабочего каталога процесса.
+        let target = policy.check_write("report.csv").unwrap();
+        assert!(target.starts_with(dir.path().canonicalize().unwrap()));
+        let tmp = std::env::temp_dir().join("outside-http-root.csv");
+        if !tmp.starts_with(dir.path()) {
+            assert!(policy.check_write(tmp.to_str().unwrap()).is_err());
+        }
+        assert!(http_file_policy(&[dir.path().join("missing")]).is_err());
     }
 
     #[test]

@@ -21,16 +21,21 @@
 //! строками.
 
 pub mod app_overview;
+pub mod certificate_request;
 pub mod config_download;
 pub mod image_sync;
 pub mod listing;
 pub mod listing_apply;
 pub mod listing_export;
 pub mod package_upload;
+pub mod products;
+pub mod products_apply;
+pub mod products_export;
 pub mod release;
 pub mod release_manage;
 pub mod release_status;
 pub mod release_submit;
+pub mod remote_config_set;
 pub mod report_download;
 pub mod reviews_summary;
 pub mod search_apps;
@@ -94,6 +99,10 @@ pub struct Context {
     /// Уровень доступа сервера. Инструмент проверяет его сам, если отдельный режим вызова
     /// требует уровня выше, чем у самого инструмента.
     pub access: AccessLevel,
+    /// HTTP-режим (`serve --http`): уровень доступа задаёт токен клиента, поэтому подсказки
+    /// об уровне называют токен и оператора сервера, а не флаги
+    /// ([`crate::registry::access_hint`]).
+    pub http: bool,
 }
 
 impl std::fmt::Debug for Context {
@@ -102,6 +111,8 @@ impl std::fmt::Debug for Context {
             .field("api", &self.api)
             .field("profile", &self.profile)
             .field("access", &self.access)
+            .field("http", &self.http)
+            .field("http", &self.http)
             .finish_non_exhaustive()
     }
 }
@@ -167,6 +178,27 @@ impl SecretVault for NoVault {
     }
 }
 
+/// Хранилища секретов нет, потому что сервер работает в HTTP-режиме (`serve --http`): он
+/// удалённый и общий для клиентов, системного хранилища у него нет (часто это контейнер), а
+/// хранить секреты клиентов он не должен. Сообщение объясняет именно это, без советов про
+/// хранилище: у оператора сервера и у агента его здесь нет.
+#[derive(Debug, Default, Clone, Copy)]
+pub struct HttpNoVault;
+
+impl SecretVault for HttpNoVault {
+    fn store(&self, _account: &str, _value: &str) -> Result<(), ToolError> {
+        Err(ToolError::new(
+            "secrets cannot be stored in HTTP mode: this server runs remotely for several \
+             clients and does not keep secrets for them, so this feature is not available here; \
+             nothing was stored. Do not show the secret in the conversation",
+        ))
+    }
+
+    fn contains(&self, _account: &str) -> Result<bool, ToolError> {
+        Ok(false)
+    }
+}
+
 /// Хранилище секретов в памяти процесса — для тестов (системный keychain в автотестах не
 /// используется).
 #[derive(Debug, Default)]
@@ -222,9 +254,13 @@ pub fn all() -> Vec<CompositeTool> {
     tools.extend(reviews_summary::tools());
     tools.extend(search_apps::tools());
     tools.extend(config_download::tools());
+    tools.extend(certificate_request::tools());
     tools.extend(listing_export::tools());
     tools.extend(listing_apply::tools());
     tools.extend(image_sync::tools());
+    tools.extend(products_export::tools());
+    tools.extend(products_apply::tools());
+    tools.extend(remote_config_set::tools());
     tools
 }
 

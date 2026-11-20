@@ -32,7 +32,7 @@ use serde_json::{Value, json};
 use crate::composite::CompositeTool;
 use crate::error::ToolError;
 use crate::registry::{
-    ToolRegistry, access_flag, access_name, annotations, composite_tool, operation_tool,
+    ToolRegistry, access_action, access_name, annotations, composite_tool, operation_tool,
 };
 use crate::request::API_REQUEST_TOOL;
 use crate::validate::kind;
@@ -49,7 +49,7 @@ const MAX_LIMIT: usize = 50;
 const ARGS: &[&str] = &["query", "tool_name", "toolset", "limit"];
 
 /// Описание инструмента.
-pub fn api_search_tool() -> Tool {
+pub fn api_search_tool(http: bool) -> Tool {
     let schema = json!({
         "type": "object",
         "additionalProperties": false,
@@ -83,18 +83,23 @@ pub fn api_search_tool() -> Tool {
         Value::Object(map) => map,
         _ => JsonObject::new(),
     };
-    let mut tool = Tool::new(
-        API_SEARCH_TOOL,
+    let enables = if http {
+        "an access token with a higher level or other toolsets from the server operator, or a \
+         call with `api_request`"
+    } else {
+        "the --allow-write or --allow-destructive flag, the --toolsets option, or a call with \
+         `api_request`"
+    };
+    let description = format!(
         "Search all AppGallery Connect API operations by words in English or Russian (tool \
          names, operation IDs, summaries, paths, toolsets), including tools that are not \
          enabled on this server and operations without a tool. Each result gives the toolset, \
          the access level and whether it can be called here; if not, why and what enables it \
-         (the --allow-write or --allow-destructive flag, the --toolsets option, or a call with \
-         `api_request`). Excluded operations come with a `note` and the `alternative` to use. \
+         ({enables}). Excluded operations come with a `note` and the `alternative` to use. \
          Pass `tool_name` to get the full description and argument schema of one tool. Does \
-         not call the API.",
-        Arc::new(schema),
+         not call the API."
     );
+    let mut tool = Tool::new(API_SEARCH_TOOL, description, Arc::new(schema));
     tool.title = Some("Search AppGallery Connect API operations".to_owned());
     tool.annotations = Some(annotations(
         "Search AppGallery Connect API operations",
@@ -439,10 +444,10 @@ fn tool_status(name: &str, registry: &ToolRegistry, api_request: Option<String>)
 }
 
 /// Как вызвать операцию через `api_request`, если уровень сервера это позволяет.
+/// Операции HMS IAP идут на другой хост и подписываются секретом приложения:
+/// `api_request` их не вызывает.
 fn api_request_call(op: &OperationDef, registry: &ToolRegistry) -> Option<String> {
-    registry
-        .max_access()
-        .allows(op.access)
+    (registry.max_access().allows(op.access) && !op.service.is_iap())
         .then(|| format!("{} {}", op.method.as_str(), op.path))
 }
 
@@ -486,11 +491,10 @@ fn describe_excluded(op: &ExcludedOperationDef, registry: &ToolRegistry) -> Valu
         )
     } else {
         format!(
-            "no tool: {} It needs {} access: ask the user to restart the server with {}, then \
-             call it with `{API_REQUEST_TOOL}`",
+            "no tool: {} It needs {} access: {}, then call it with `{API_REQUEST_TOOL}`",
             op.reason.explanation(),
             access_name(op.access),
-            access_flag(op.access)
+            access_action(op.access, registry.http())
         )
     };
     let mut value = json!({
@@ -685,6 +689,10 @@ mod tests {
             ("файл конфигурации", "get_app_config_file"),
             ("отпечатки сертификата", "fingerprint"),
             ("зависимость от гугл", "update_gms_dependency"),
+            ("удалённая конфигурация", "remote_config"),
+            ("откатить конфигурацию", "rollback_remote_config"),
+            ("история версий конфигурации", "list_remote_config_versions"),
+            ("изменить параметр конфигурации", "update_remote_config"),
         ] {
             let result = run(&registry, json!({"query": query, "limit": 50}));
             assert!(
@@ -706,6 +714,58 @@ mod tests {
         );
         // «ё» и «е» равны.
         assert_eq!(terms("отчёты"), terms("отчеты"));
+    }
+
+    #[test]
+    fn finds_purchase_operations_without_api_request() {
+        let registry = registry(AccessLevel::Read, Some(&["apps"]));
+        for (query, expected) in [
+            ("проверить покупку", "verify_product_purchase"),
+            ("подтвердить доставку покупки", "confirm_product_purchase"),
+            ("возвраты покупок", "list_cancelled_purchases"),
+            ("заказы покупок", "list_iap_orders"),
+            ("отменить подписку", "cancel_subscription"),
+            ("отложить подписку", "defer_subscription"),
+            ("возврат за подписку", "refund_subscription"),
+            ("отозвать подписку", "revoke_subscription"),
+            ("verify purchase token", "verify_product_purchase"),
+        ] {
+            let result = run(&registry, json!({"query": query, "limit": 50}));
+            assert!(
+                tools(&result).contains(&expected.to_owned()),
+                "{query}: {result}"
+            );
+        }
+        // Набор не включён, но `api_request` операции HMS IAP не вызывает.
+        let result = run(&registry, json!({"query": "verify purchase token"}));
+        let found = entry(&result, "verify_product_purchase");
+        assert_eq!(found["toolset"], "purchases");
+        let status = found["status"].as_str().unwrap();
+        assert!(status.contains("toolset `purchases`"), "{status}");
+        assert!(!status.contains("api_request"), "{status}");
+
+        // REST API IAP Kit (HarmonyOS 5+) находится, но не вызывается.
+        for query in ["HarmonyOS order status", "статус подписки HarmonyOS"] {
+            let result = run(&registry, json!({"query": query, "limit": 50}));
+            let kit = result["results"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|r| r["group"] == "iapkit")
+                .unwrap_or_else(|| panic!("{query}: {result}"));
+            assert_eq!(kit["callable"], false, "{kit}");
+            assert!(
+                kit["status"].as_str().unwrap().starts_with("not callable"),
+                "{kit}"
+            );
+            assert!(
+                kit["alternative"]
+                    .as_str()
+                    .unwrap()
+                    .contains("purchases toolset"),
+                "{kit}"
+            );
+        }
     }
 
     #[test]
@@ -738,6 +798,60 @@ mod tests {
 
         let result = run(&registry, json!({"query": "list reviews"}));
         assert_eq!(entry(&result, "list_reviews")["status"], "available");
+    }
+
+    #[test]
+    fn http_mode_asks_for_an_access_token_instead_of_flags() {
+        use appgallery_connect_api::spec::{ExclusionReason, HttpMethod};
+
+        let registry = ToolRegistry::new(&ServerOptions {
+            max_access: AccessLevel::Read,
+            toolsets: Some(vec!["apps".to_owned(), "reviews".to_owned()]),
+            http: true,
+            ..ServerOptions::default()
+        })
+        .unwrap();
+        let result = run(&registry, json!({"query": "reply review"}));
+        let status = entry(&result, "reply_review")["status"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        assert!(
+            status.contains("access token with the destructive level"),
+            "{status}"
+        );
+        assert!(!status.contains("--allow-"), "{status}");
+
+        // Операция без инструмента, которую можно вызвать только через `api_request`.
+        let above = ExcludedOperationDef {
+            operation_id: "test.excluded.update",
+            group: "publishing",
+            toolset: "apps",
+            summary: "Test operation",
+            method: HttpMethod::Put,
+            path: "/api/publish/v2/test",
+            access: AccessLevel::Write,
+            reason: ExclusionReason::Overlay,
+            callable: true,
+            note: "",
+            alternative: "",
+        };
+        let status = describe_excluded(&above, &registry)["status"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        assert!(status.contains("server operator"), "{status}");
+        assert!(!status.contains("--allow-"), "{status}");
+
+        let description = api_search_tool(true).description.unwrap();
+        assert!(description.contains("access token"), "{description}");
+        assert!(!description.contains("--allow-"), "{description}");
+        assert!(
+            api_search_tool(false)
+                .description
+                .unwrap()
+                .contains("--allow-write")
+        );
     }
 
     #[test]

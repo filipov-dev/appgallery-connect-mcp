@@ -9,28 +9,51 @@ rust-version.workspace = true
 
 [dependencies]
 anyhow = "1.0.104"
-appgallery-connect-api = { version = "0.1.0", path = "../appgallery-connect-api" }
-appgallery-connect-mcp-core = { version = "0.1.0", path = "../appgallery-connect-mcp-core" }
+# HTTP-режим (`serve --http`): маршруты и сервер поверх hyper.
+axum = { version = "0.8.9", default-features = false, features = ["http1", "tokio"] }
+appgallery-connect-api = { version = "0.2.0", path = "../appgallery-connect-api" }
+appgallery-connect-mcp-core = { version = "0.2.0", path = "../appgallery-connect-mcp-core" }
+# Маскирование base64-форм учётных данных в выводе команды `key exec`.
+base64 = "0.22.1"
 clap = { version = "4.6.7", features = ["derive", "env"] }
 dirs = "7.0.0"
-rmcp = { version = "3.8.0", default-features = false, features = ["server", "transport-io"] }
+rmcp = { version = "3.8.0", default-features = false, features = ["server", "transport-io", "transport-streamable-http-server"] }
 # Скрытый ввод секрета API-клиента в терминале (читает из TTY без эха).
 rpassword = "7.5.4"
 serde = { version = "1.0.229", features = ["derive"] }
-tokio = { version = "1.54.1", features = ["macros", "rt-multi-thread"] }
+serde_json = "1.0.154"
+# Хеши токенов доступа HTTP-режима и их сравнение за постоянное время.
+sha2 = "0.10.9"
+subtle = "2.6.1"
+# Временный каталог файла учётных данных `key exec`.
+tempfile = "3.27.0"
+tokio = { version = "1.54.1", features = ["macros", "rt-multi-thread", "process", "signal", "io-util", "io-std", "sync", "net", "time"] }
+# Остановка HTTP-сервера по сигналу.
+tokio-util = "0.7.20"
 toml = "1.2.0"
 tracing = "0.1.44"
 # Логи сервера — только в stderr (stdout занят протоколом MCP).
 tracing-subscriber = { version = "0.3.23", default-features = false, features = ["env-filter", "fmt", "std"] }
+# Адрес возврата входа пользователя и ссылка на страницу входа HUAWEI ID.
+url = "2.5.8"
 # Правка `config.toml` Codex с сохранением комментариев и чужих записей.
 toml_edit = "0.25.19"
 zeroize = "1.8.2"
 
+[target.'cfg(unix)'.dependencies]
+# Пересылка SIGTERM и SIGHUP дочерней команде `key exec`.
+nix = { version = "0.29.0", default-features = false, features = ["signal"] }
+
+[target.'cfg(windows)'.dependencies]
+# Объект задания (Job Object) для дерева процессов команды `key exec`: безопасный API без
+# `unsafe` в нашем коде.
+win32job = "2.0.3"
+
 [dev-dependencies]
+# Запросы к HTTP-режиму в тестах.
+reqwest = { version = "0.13.5", default-features = false, features = ["rustls", "json"] }
 rmcp = { version = "3.8.0", default-features = false, features = ["client", "server"] }
-serde_json = "1.0.154"
-tempfile = "3.27.0"
-tokio = { version = "1.54.1", features = ["io-util", "macros", "rt-multi-thread"] }
+tokio = { version = "1.54.1", features = ["io-util", "macros", "rt-multi-thread", "time"] }
 wiremock = "0.6.5"
 
 [lints]

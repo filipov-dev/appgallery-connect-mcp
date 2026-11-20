@@ -8,7 +8,7 @@
 | --- | --- |
 | `crates/appgallery-connect-api` | Клиент AppGallery Connect API: снимок спецификации и генератор таблицы операций (`build.rs`), регионы и хосты, исполнитель запросов (повторы, конверт результата, загрузка и скачивание файлов), access token, хранилище учётных данных. |
 | `crates/appgallery-connect-mcp-core` | MCP-инструменты поверх клиента API: реестр и уровни доступа, `api_search`, `api_request`, фильтр `jq`, пользовательские инструменты, динамические наборы, вырезание секретов, `FilePolicy`, составные инструменты (`src/composite/`). Не зависит от транспорта. |
-| `crates/appgallery-connect-mcp` | Бинарник `appgallery-connect-mcp`: CLI (`auth`, `connect`, `serve`, `tools`, `toolsets`, скрытый `jq-worker`), профили, регистрация в клиентах, stdio-транспорт. |
+| `crates/appgallery-connect-mcp` | Бинарник `appgallery-connect-mcp`: CLI (`auth`, `connect`, `serve`, `tools`, `toolsets`, скрытый `jq-worker`), профили, регистрация в клиентах, транспорты stdio и HTTP (`serve --http`: токены доступа, файл секрета). |
 
 ## Сборка и проверки
 
@@ -75,6 +75,8 @@ python3 -I crates/appgallery-connect-api/spec/update_spec.py --lock --from-dir D
 python3 -I -B -m unittest discover -s crates/appgallery-connect-api/spec -p 'test_*.py'   # офлайн-тесты
 ```
 
+Коды `--check`: `0` — справочник не изменился, `3` — изменился (в отчёте изменённые, новые и пропавшие страницы с названием и адресом), `4` — портал документации недоступен после повторов или вышел лимит времени (15 минут, `--time-limit`), справочник не сверен; `1` — другая ошибка, `2` — неверные аргументы.
+
 Порядок, когда `--check` нашёл изменения: `--draft DIR`, ручная правка `openapi.json` (черновик — подспорье: справочник местами неточен), новые операции — в `overlay.toml` (набор, имя, уровень доступа), `--lock --from-dir DIR`, затем `cargo test` и просмотр снапшотов. Каталог черновика в репозиторий не добавляется.
 
 Скрипты оболочки проверяются `bash -n` (или `sh -n` для POSIX) и `shellcheck`:
@@ -86,7 +88,7 @@ shellcheck -S warning scripts/ci/linux-verify.sh scripts/ci/macos-build.sh scrip
 
 ## Проверки в CI
 
-Те же проверки идут в CI на каждый pull request и на push в `main`:
+Те же проверки идут в CI на каждый pull request (после слияния в `main` повторного прогона нет):
 
 | Задача | Где | Что делает |
 | --- | --- | --- |
@@ -94,6 +96,8 @@ shellcheck -S warning scripts/ci/linux-verify.sh scripts/ci/macos-build.sh scrip
 | `verify-linux-musl-x86_64` | Linux | Статическая сборка `scripts/release/musl-build.sh x86_64`, запуск бинарника в Alpine и Debian slim (`scripts/ci/musl-smoke.sh`) и проверка `install.sh` там же (`scripts/ci/install-test.sh`). |
 | `build-macos` | macOS | `scripts/ci/macos-build.sh`: universal-бинарник (arm64 и x86_64) без подписи и его проверка (`scripts/ci/macos-smoke.sh`); проверка `install.sh`. |
 | `windows-check` | Windows | `scripts/ci/windows-build.ps1 -Check`: `cargo test` и `cargo clippy` для `x86_64-pc-windows-msvc`. |
+
+Раз в неделю по расписанию (и вручную) идёт `spec-drift`: на Linux в образе `python:3.13-slim-bookworm` — офлайн-тесты скриптов спецификации и `update_spec.py --check`. Прогон красный, если справочник изменился (код `3`, в логе — список страниц) или портал документации не ответил после повторов (код `4`, в логе сказано, что справочник не сверен и проверку нужно повторить). Сборки Rust в нём нет, секреты не нужны.
 
 Раннеров мало, поэтому всё, что можно, проверяйте локально до отправки изменений.
 
@@ -133,10 +137,10 @@ sh scripts/ci/install-test.sh target/install-fixture-macos
 Проверить экспорт и скрипты локально, ничего не публикуя:
 
 ```bash
-scripts/release/check-version.sh v0.1.0
-scripts/release/export-public.sh v0.1.0 /tmp/agc-export --source-ref HEAD
-scripts/release/sync-public.sh v0.1.0 --dry-run
-scripts/release/publish-release.sh v0.1.0 --prepare --dry-run
+scripts/release/check-version.sh v0.2.0
+scripts/release/export-public.sh v0.2.0 /tmp/agc-export --source-ref HEAD
+scripts/release/sync-public.sh v0.2.0 --dry-run
+scripts/release/publish-release.sh v0.2.0 --prepare --dry-run
 ```
 
 `export-public.sh` скачивает `gitleaks`, если его нет в `PATH`. `sync-public.sh --dry-run` клонирует публичный репозиторий, но ничего в него не отправляет.
@@ -168,9 +172,12 @@ scripts/release/musl-build.sh x86_64 out/     # или aarch64
 ```bash
 scripts/ci/musl-smoke.sh out/appgallery-connect-mcp
 scripts/ci/musl-smoke.sh out/appgallery-connect-mcp --with-secret-service   # от root, ставит пакеты
+scripts/ci/musl-smoke.sh out/appgallery-connect-mcp --http   # HTTP-режим, при нужде ставит curl
 ```
 
-Скрипт на POSIX sh. Без флага пакеты в образ не ставит: проверяет справку подкоманд, `tools list`, `toolsets`, `tools check` с маленьким `tools.toml`, фильтр `jq` в отдельном процессе и понятные ошибки `auth` и `serve` без Secret Service. С `--with-secret-service` ставит D-Bus, gnome-keyring и `secret-tool`, поднимает сессию с разблокированным хранилищем, входит с выдуманными учётными данными без проверки в сети (`auth login --no-verify`), проверяет `auth status`, `serve --status` и MCP-сессию через stdio (`initialize`, `tools/list`) и выходит (`auth logout`). В сеть Huawei скрипт не ходит.
+Скрипт на POSIX sh. Без флага пакеты в образ не ставит: проверяет справку подкоманд, `tools list`, `toolsets`, `tools check` с маленьким `tools.toml`, фильтр `jq` в отдельном процессе и понятные ошибки `auth` и `serve` без Secret Service. С `--with-secret-service` ставит D-Bus, gnome-keyring и `secret-tool`, поднимает сессию с разблокированным хранилищем, входит с выдуманными учётными данными без проверки в сети (`auth login --no-verify`), проверяет `auth status`, `serve --status` и MCP-сессию через stdio (`initialize`, `tools/list`) и выходит (`auth logout`). С `--http` проверяет только HTTP-режим (и на macOS): запускает `serve --http` на `127.0.0.1:18769` с выдуманным файлом секрета и токенами чтения и записи, проверяет ошибки запуска (открытый файл секрета, токен вместо хеша, `--status` и `--dynamic-toolsets` вместе с `--http`), `/health`, `401` без токена и с чужим токеном, `403` для чужих `Host` и `Origin`, `413`, что токен чтения не видит и не вызывает инструменты записи, что секрет и токены не попадают в ответы и логи, пустой stdout и выход по SIGTERM. В сеть Huawei скрипт не ходит.
+
+Образ Docker (`Dockerfile`, `compose.yaml`) в CI не собирается. Проверка локально: `docker build -t appgallery-connect-mcp .` (или `podman build`), затем `docker run` с файлом токенов и файлом секрета ([HTTP-режим и Docker](http.md#docker)).
 
 На macOS те же проверки без записи в Keychain — `scripts/ci/macos-smoke.sh <binary>`, на Windows — `scripts/ci/windows-smoke.ps1 <binary>` (с учётными данными во временном профиле Credential Manager и `connect` с поддельным `claude.cmd`).
 

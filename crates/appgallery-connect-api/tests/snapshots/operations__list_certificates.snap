@@ -1,0 +1,81 @@
+---
+source: crates/appgallery-connect-api/tests/operations.rs
+assertion_line: 676
+expression: "snapshot_view(op(\"list_certificates\"))"
+---
+{
+  "access": "read",
+  "auth_modes": [
+    "api-client",
+    "oauth-client",
+    "service-account"
+  ],
+  "body": "Json",
+  "description": "A read-only query sent with POST. Each certificate comes with a temporary download link.\n\nRead-only: the POST request only reads data.",
+  "group": "provisioning",
+  "input_schema": {
+    "additionalProperties": false,
+    "properties": {
+      "body": {
+        "description": "Request body: JSON object.",
+        "properties": {
+          "certIds": {
+            "description": "Certificate ID list. Array length: 1–100",
+            "items": {
+              "maxLength": 32,
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "certType": {
+            "description": "Certificate type. Options: 1: debug 2: release 3: in-house release 4: binary certificate (used for signing binary programs)",
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      }
+    },
+    "required": [
+      "body"
+    ],
+    "type": "object"
+  },
+  "method": "POST",
+  "operation_id": "provisioning.cert.list",
+  "params": [
+    {
+      "api_name": "body",
+      "description": "Request body: JSON object.",
+      "location": "Body",
+      "name": "body",
+      "repeated": false,
+      "required": true,
+      "value_type": "Object"
+    }
+  ],
+  "path": "/api/publish/v3/cert/list",
+  "reference": "https://developer.huawei.com/consumer/en/doc/app/agc-help-provision-api-query-cent-0000002271160629",
+  "response": "Json",
+  "result": {
+    "code_field": "code",
+    "field": "ret",
+    "message_field": "msg"
+  },
+  "secrets": [
+    {
+      "description": "a temporary link to the certificate file, valid for about five minutes",
+      "hint": "save_to saves one file: narrow the list to one certificate with certIds in body.",
+      "kind": "DownloadUrl",
+      "path": "certInfo[].certDownloadUrl"
+    },
+    {
+      "description": "a temporary link to the certificate file, valid for about five minutes",
+      "hint": "save_to saves one file: narrow the list to one certificate with certIds in body.",
+      "kind": "DownloadUrl",
+      "path": "certList[].certDownloadUrl"
+    }
+  ],
+  "summary": "Lists signing certificates, optionally by type or IDs.",
+  "tool_name": "list_certificates",
+  "toolset": "provisioning"
+}

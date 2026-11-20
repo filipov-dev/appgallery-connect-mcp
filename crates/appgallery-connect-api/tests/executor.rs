@@ -13,8 +13,8 @@ use appgallery_connect_api::token::{
     ApiClientTokens, ManualClock, REFRESH_MARGIN, StaticToken, TokenError, TokenSource,
 };
 use appgallery_connect_api::{
-    AccessLevel, ApiClientCredentials, BodyKind, HttpMethod, OperationDef, ParamDef, ParamLocation,
-    ParamType, Region, ResponseKind, ResultDef,
+    AccessLevel, ApiClientCredentials, ApiService, BodyKind, HttpMethod, OperationDef, ParamDef,
+    ParamLocation, ParamType, Region, ResponseKind, ResultDef,
 };
 use serde_json::{Value, json};
 use wiremock::matchers::{body_json, header, method, path, query_param};
@@ -465,6 +465,11 @@ static UPDATE_LANG: OperationDef = OperationDef {
     reference: "",
     input_schema: "{}",
     secrets: &[],
+    project_param: None,
+    auth_modes: &[],
+    service: ApiService::Connect,
+    json_strings: &[],
+    omitted: &[],
 };
 
 fn read_operation(result: Option<ResultDef>, method: HttpMethod) -> &'static OperationDef {
@@ -485,6 +490,11 @@ fn read_operation(result: Option<ResultDef>, method: HttpMethod) -> &'static Ope
         reference: "",
         input_schema: "{}",
         secrets: &[],
+        project_param: None,
+        auth_modes: &[],
+        service: ApiService::Connect,
+        json_strings: &[],
+        omitted: &[],
     }))
 }
 
@@ -649,6 +659,11 @@ async fn service_headers_cannot_be_overridden() {
         reference: "",
         input_schema: "{}",
         secrets: &[],
+        project_param: None,
+        auth_modes: &[],
+        service: ApiService::Connect,
+        json_strings: &[],
+        omitted: &[],
     };
     let err = client
         .call(&BAD, &json!({"auth": "Bearer other"}))
@@ -1185,4 +1200,310 @@ fn scrub_removes_known_and_shaped_secrets() {
         token(0)
     );
     assert_eq!(client.scrub(&text), "id *** secret *** token *** other");
+}
+
+// ---------- API-клиенты проектов ----------
+
+fn project_client_id(project: &str) -> String {
+    ["2640", "1357", "9024", project].concat()
+}
+
+fn project_client_secret(project: &str) -> String {
+    ["9F8E", "7D6C", "5B4A", "3210", project].concat().repeat(3)
+}
+
+fn project_token(project: &str) -> String {
+    ["project", "-token-", "value-", project, "-0123456789"].concat()
+}
+
+fn project_credentials(project: &str) -> appgallery_connect_api::ProjectCredentials {
+    appgallery_connect_api::ProjectCredentials::new(
+        project,
+        ApiClientCredentials::from_parts(
+            project_client_id(project),
+            project_client_secret(project),
+        )
+        .unwrap(),
+    )
+    .unwrap()
+}
+
+/// Операция сервиса проекта: `get_project` таблицы с пометкой «нужен клиент проекта» по
+/// параметру пути `projectId` (в снимке таких операций пока нет).
+fn project_operation() -> &'static OperationDef {
+    let base = appgallery_connect_api::spec::find("get_project").unwrap();
+    Box::leak(Box::new(OperationDef {
+        project_param: Some("projectId"),
+        service: ApiService::Connect,
+        json_strings: &[],
+        omitted: &[],
+        ..*base
+    }))
+}
+
+/// Метод получения токена: клиенту команды — `token(1)`, клиенту проекта — его токен.
+async fn mount_team_and_project_tokens(server: &MockServer, projects: &[&str]) {
+    Mock::given(method("POST"))
+        .and(path(TOKEN_PATH))
+        .and(wiremock::matchers::body_partial_json(
+            json!({"client_id": client_id()}),
+        ))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_json(json!({"access_token": token(1), "expires_in": 172_800})),
+        )
+        .expect(1)
+        .mount(server)
+        .await;
+    for project in projects {
+        Mock::given(method("POST"))
+            .and(path(TOKEN_PATH))
+            .and(wiremock::matchers::body_partial_json(json!({
+                "client_id": project_client_id(project),
+                "client_secret": project_client_secret(project),
+            })))
+            .respond_with(ResponseTemplate::new(200).set_body_json(
+                json!({"access_token": project_token(project), "expires_in": 172_800}),
+            ))
+            .expect(1)
+            .mount(server)
+            .await;
+    }
+}
+
+#[tokio::test]
+async fn project_operations_use_the_project_client_and_others_the_team_client() {
+    let server = MockServer::start().await;
+    mount_team_and_project_tokens(&server, &["100", "200"]).await;
+    Mock::given(method("GET"))
+        .and(path("/api/publish/v2/app-info"))
+        .and(header("client_id", client_id().as_str()))
+        .and(header("authorization", bearer(1).as_str()))
+        .respond_with(ResponseTemplate::new(200).set_body_json(ok_body()))
+        .expect(2)
+        .mount(&server)
+        .await;
+    for project in ["100", "200"] {
+        let route = format!("/api/project-service/v1/projects/{project}");
+        let token = format!("Bearer {}", project_token(project));
+        Mock::given(method("GET"))
+            .and(path(route.as_str()))
+            .and(header("client_id", project_client_id(project).as_str()))
+            .and(header("authorization", token.as_str()))
+            .respond_with(ResponseTemplate::new(200).set_body_json(ok_body()))
+            .expect(2)
+            .mount(&server)
+            .await;
+    }
+
+    let mut config = config(&server);
+    config.projects = vec![project_credentials("100"), project_credentials("200")];
+    config.profile = Some("work".into());
+    let client = ApiClient::new(config).unwrap();
+    assert_eq!(client.project_ids(), ["100", "200"]);
+    let op = project_operation();
+    let plain = || ApiRequest::new(HttpMethod::Get, "/api/publish/v2/app-info");
+    // Запросы вперемешку в одном процессе: у каждого клиента свой токен, один на клиента.
+    for project in ["100", "200", "100", "200"] {
+        client
+            .call(op, &json!({"projectId": project}))
+            .await
+            .unwrap();
+    }
+    client.execute(plain()).await.unwrap();
+    client.execute(plain()).await.unwrap();
+
+    // Тот же выбор для запроса, собранного вручную (так `api_request` вызывает путь
+    // операции): значение берётся из сегмента пути.
+    let mut raw = ApiRequest::new(HttpMethod::Get, "/api/project-service/v1/projects/200");
+    raw.select_project(op).unwrap();
+    assert_eq!(raw.project.as_deref(), Some("200"));
+    // Обычная операция клиента проекта не выбирает.
+    let mut other = plain();
+    other
+        .select_project(appgallery_connect_api::spec::find("get_app_info").unwrap())
+        .unwrap();
+    assert_eq!(other.project, None);
+
+    // Токены и учётные данные всех клиентов вырезаются из текстов.
+    let text = format!(
+        "{} {} {} {}",
+        project_token("100"),
+        project_client_secret("200"),
+        project_client_id("100"),
+        token(1)
+    );
+    assert_eq!(client.scrub(&text), "*** *** *** ***");
+}
+
+#[tokio::test]
+async fn project_operation_without_its_client_is_not_sent() {
+    let server = MockServer::start().await;
+    let mut config = config(&server);
+    config.projects = vec![project_credentials("100")];
+    config.profile = Some("work".into());
+    let client = ApiClient::new(config).unwrap();
+    let op = project_operation();
+    let err = client
+        .call(op, &json!({"projectId": "300"}))
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(&err, ApiError::MissingProjectCredentials { project_id, profile }
+            if project_id == "300" && profile.as_deref() == Some("work")),
+        "{err:?}"
+    );
+    let text = err.to_string();
+    assert!(
+        text.contains("auth project add --profile work --project-id 300"),
+        "{text}"
+    );
+
+    // Без идентификатора проекта и с неверным — ошибка до запроса.
+    let err = ApiRequest::for_operation(op, &json!({})).unwrap_err();
+    assert!(err.to_string().contains("projectId"), "{err}");
+    let mut raw = ApiRequest::new(HttpMethod::Get, "/api/project-service/v1/projects/a%2Fb");
+    let err = raw.select_project(op).unwrap_err();
+    assert!(err.to_string().contains("invalid `projectId`"), "{err}");
+    // Без клиентов проектов вовсе — та же ошибка, а не запрос от имени клиента команды.
+    let client = static_client(&server);
+    let err = client
+        .call(op, &json!({"projectId": "100"}))
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(err, ApiError::MissingProjectCredentials { .. }),
+        "{err:?}"
+    );
+    assert!(server.received_requests().await.unwrap().is_empty());
+
+    // Клиент проекта работает и без клиента команды.
+    Mock::given(method("POST"))
+        .and(path(TOKEN_PATH))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_json(json!({"access_token": project_token("100"), "expires_in": 60})),
+        )
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/api/project-service/v1/projects/100"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(ok_body()))
+        .mount(&server)
+        .await;
+    let mut config = ClientConfig::new(Region::Ru, None);
+    config.base_url = Some(server.uri());
+    config.projects = vec![project_credentials("100")];
+    let client = ApiClient::new(config).unwrap();
+    client.call(op, &json!({"projectId": "100"})).await.unwrap();
+    let err = client
+        .execute(ApiRequest::new(HttpMethod::Get, "/api/publish/v2/app-info"))
+        .await
+        .unwrap_err();
+    assert!(matches!(err, ApiError::MissingCredentials), "{err:?}");
+}
+
+#[tokio::test]
+async fn project_client_errors_and_rejections_do_not_leak_its_secrets() {
+    let server = MockServer::start().await;
+    // Отказ в токене с отражённым секретом клиента проекта.
+    Mock::given(method("POST"))
+        .and(path(TOKEN_PATH))
+        .and(wiremock::matchers::body_partial_json(
+            json!({"client_id": project_client_id("100")}),
+        ))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "ret": {"code": 203817914, "msg": format!(
+                "client {} secret {} is invalid",
+                project_client_id("100"),
+                project_client_secret("100")
+            )}
+        })))
+        .mount(&server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path(TOKEN_PATH))
+        .and(wiremock::matchers::body_partial_json(
+            json!({"client_id": project_client_id("200")}),
+        ))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(
+                json!({"access_token": project_token("200"), "expires_in": 172_800}),
+            ),
+        )
+        .mount(&server)
+        .await;
+    // Ошибка API, которая отражает заголовки авторизации.
+    Mock::given(method("GET"))
+        .and(path("/api/project-service/v1/projects/200"))
+        .respond_with(ResponseTemplate::new(403).set_body_json(json!({
+            "ret": {"code": 403, "msg": format!(
+                "token {} of client {} denied",
+                project_token("200"),
+                project_client_id("200")
+            )}
+        })))
+        .mount(&server)
+        .await;
+
+    let mut config = config(&server);
+    config.projects = vec![project_credentials("100"), project_credentials("200")];
+    let client = ApiClient::new(config).unwrap();
+    let op = project_operation();
+    let rejected = client
+        .call(op, &json!({"projectId": "100"}))
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(rejected, ApiError::Token(TokenError::Rejected { .. })),
+        "{rejected:?}"
+    );
+    let denied = client
+        .call(op, &json!({"projectId": "200"}))
+        .await
+        .unwrap_err();
+    assert_eq!(denied.status(), Some(403));
+    for text in [
+        rejected.to_string(),
+        format!("{rejected:?}"),
+        denied.to_string(),
+        format!("{denied:?}"),
+        format!("{client:?}"),
+    ] {
+        for secret in [
+            project_client_secret("100"),
+            project_client_secret("200"),
+            project_client_id("100"),
+            project_client_id("200"),
+            project_token("200"),
+        ] {
+            assert!(!text.contains(&secret), "{text}");
+        }
+    }
+}
+
+#[test]
+fn project_is_taken_from_query_or_header_of_the_operation() {
+    let base = appgallery_connect_api::spec::find("list_project_services").unwrap();
+    let op: &'static OperationDef = Box::leak(Box::new(OperationDef {
+        project_param: Some("projectId"),
+        service: ApiService::Connect,
+        json_strings: &[],
+        omitted: &[],
+        ..*base
+    }));
+    let request = ApiRequest::for_operation(op, &json!({"projectId": 100, "appID": 1})).unwrap();
+    assert_eq!(request.project.as_deref(), Some("100"));
+    // `api_request`: имя query без учёта регистра; разные значения — ошибка.
+    let mut raw = ApiRequest::new(HttpMethod::Get, op.path).with_query("ProjectId", "200");
+    raw.select_project(op).unwrap();
+    assert_eq!(raw.project.as_deref(), Some("200"));
+    let mut raw = ApiRequest::new(HttpMethod::Get, op.path)
+        .with_query("projectId", "200")
+        .with_query("projectId", "300");
+    let err = raw.select_project(op).unwrap_err();
+    assert!(err.to_string().contains("different values"), "{err}");
+    let mut raw = ApiRequest::new(HttpMethod::Get, op.path);
+    assert!(raw.select_project(op).is_err());
+    assert_eq!(raw.project, None);
 }

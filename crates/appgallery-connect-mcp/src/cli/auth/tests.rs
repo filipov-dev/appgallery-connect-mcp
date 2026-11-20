@@ -5,7 +5,9 @@
 use std::fs;
 use std::path::Path;
 
-use appgallery_connect_api::{ApiClientCredentials, MemoryStore, Region, StoreError};
+use appgallery_connect_api::{
+    ApiClientCredentials, MemoryStore, OAuthCredentials, Region, StoreError,
+};
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
@@ -28,6 +30,12 @@ fn args(profile: &str) -> LoginArgs {
         default_apps: Vec::new(),
         default_packages: Vec::new(),
         no_verify: false,
+        oauth: false,
+        oauth_client_id: None,
+        team_id: None,
+        oauth_scopes: Vec::new(),
+        redirect_uri: None,
+        no_browser: false,
         secret_argument: None,
         stray: Vec::new(),
     }
@@ -156,7 +164,9 @@ async fn login_status_logout() {
     assert_eq!(server.received_requests().await.unwrap().len(), before);
 
     let mut ui = ScriptedUi::default();
-    logout(&s.store, &s.repo, &mut ui, "work").unwrap();
+    logout(&s.store, &s.repo, &Verifier::new(), &mut ui, "work", false)
+        .await
+        .unwrap();
     assert!(ui.text().contains("removed from the system keychain"));
     assert!(ui.text().contains("Profile `work` removed"));
     assert!(!s.store.contains("work").unwrap());
@@ -448,6 +458,20 @@ impl CredentialStore for FailingStore {
     fn check_available(&self) -> Result<(), StoreError> {
         Err(StoreError::Unavailable("locked".into()))
     }
+
+    fn get_oauth(&self, profile: &str) -> Result<OAuthCredentials, StoreError> {
+        Err(StoreError::OAuthNotFound {
+            profile: profile.to_owned(),
+        })
+    }
+
+    fn set_oauth(&self, _: &str, _: &OAuthCredentials) -> Result<(), StoreError> {
+        Err(StoreError::Backend("access denied".into()))
+    }
+
+    fn delete_oauth(&self, _: &str) -> Result<(), StoreError> {
+        Err(StoreError::Unavailable("locked".into()))
+    }
 }
 
 #[tokio::test]
@@ -495,7 +519,16 @@ async fn keychain_failures_leave_the_profile_untouched() {
         ui.text()
     );
     assert!(err.to_string().contains("not ready"), "{err}");
-    let err = logout(&FailingStore, &s.repo, &mut ScriptedUi::default(), "locked").unwrap_err();
+    let err = logout(
+        &FailingStore,
+        &s.repo,
+        &Verifier::new(),
+        &mut ScriptedUi::default(),
+        "locked",
+        false,
+    )
+    .await
+    .unwrap_err();
     assert!(
         format!("{err:#}").contains("the profile was kept"),
         "{err:#}"
@@ -591,10 +624,370 @@ async fn status_of_all_profiles_and_logout_of_a_missing_one() {
 
     // Выход из несуществующего профиля — не ошибка.
     let mut ui = ScriptedUi::default();
-    logout(&s.store, &s.repo, &mut ui, "nobody").unwrap();
+    logout(
+        &s.store,
+        &s.repo,
+        &Verifier::new(),
+        &mut ui,
+        "nobody",
+        false,
+    )
+    .await
+    .unwrap();
     let out = ui.text();
     assert!(out.contains("No API client credentials stored"), "{out}");
     assert!(out.contains("has no saved settings"), "{out}");
-    assert!(logout(&s.store, &s.repo, &mut ScriptedUi::default(), "bad name").is_err());
+    assert!(
+        logout(
+            &s.store,
+            &s.repo,
+            &Verifier::new(),
+            &mut ScriptedUi::default(),
+            "bad name",
+            false
+        )
+        .await
+        .is_err()
+    );
     assert!(s.store.contains("ready").unwrap());
+}
+
+// ---------- API-клиенты проектов ----------
+
+const PROJECT: &str = "736430079245000001";
+
+fn project_args(profile: &str) -> ProjectAddArgs {
+    ProjectAddArgs {
+        profile: ProfileArg {
+            profile: profile.into(),
+        },
+        project_id: None,
+        credential_file: None,
+        client_id: None,
+        secret_file: None,
+        secret_stdin: false,
+        no_verify: false,
+        secret_argument: None,
+        stray: Vec::new(),
+    }
+}
+
+/// Файл `agc-apiclient-*.json` клиента проекта с учётными данными `tag`.
+fn credential_file(s: &Setup, tag: &str, kind: &str, region: &str) -> PathBuf {
+    let text = serde_json::json!({
+        "type": kind,
+        "developer_id": "1000",
+        "client_id": client_id(tag),
+        "client_secret": client_secret(tag),
+        "project_id": PROJECT,
+        "configuration_version": "1.0",
+        "region": region,
+    })
+    .to_string();
+    s.secret_file(&format!("agc-apiclient-{tag}.json"), &text)
+}
+
+/// Профиль `work` в регионе `ru` с клиентом команды `team`.
+fn with_team_profile(s: &Setup) {
+    s.store.set("work", &credentials("team")).unwrap();
+    s.repo
+        .upsert(
+            "work",
+            ProfileSettings {
+                region: Region::Ru,
+                ..ProfileSettings::default()
+            },
+        )
+        .unwrap();
+}
+
+#[tokio::test]
+async fn project_add_from_credential_file_stores_after_a_token() {
+    let s = setup();
+    with_team_profile(&s);
+    let expected = credentials("prj1");
+    let server = token_server(&expected).await;
+    let verifier = Verifier::with_base_url(&server.uri());
+    let file = credential_file(&s, "prj1", "project_client_id", "RU");
+    let args = ProjectAddArgs {
+        credential_file: Some(file.clone()),
+        ..project_args("work")
+    };
+    let mut ui = ScriptedUi::default();
+    project_add(
+        &s.store,
+        &s.repo,
+        Some(&verifier),
+        &mut ui,
+        &args,
+        ProjectSource::CredentialFile(&file),
+    )
+    .await
+    .unwrap();
+    let out = ui.text();
+    assert!(out.contains(&format!("Project: {PROJECT}")), "{out}");
+    assert!(out.contains("Client ID: 10***j1"), "{out}");
+    assert!(out.contains("issued an access token"), "{out}");
+    assert!(
+        out.contains(&format!("account `work/project/{PROJECT}`")),
+        "{out}"
+    );
+    assert!(out.contains("credential file is not needed"), "{out}");
+    assert_clean(&out, "prj1");
+    assert_eq!(s.store.get_project("work", PROJECT).unwrap(), expected);
+    // Клиент команды не тронут, проект — в файле профилей, путь к файлу — нигде.
+    assert_eq!(s.store.get("work").unwrap(), credentials("team"));
+    let saved = s.repo.get("work").unwrap().unwrap();
+    assert_eq!(saved.projects, [PROJECT]);
+    let profiles = fs::read_to_string(s.repo.path()).unwrap();
+    assert!(
+        profiles.contains(&format!("projects = [\"{PROJECT}\"]")),
+        "{profiles}"
+    );
+    assert_clean(&profiles, "prj1");
+    assert!(!profiles.contains("agc-apiclient"), "{profiles}");
+    // Файл можно удалить: клиент работает и без него.
+    fs::remove_file(&file).unwrap();
+    let (projects, problems) =
+        crate::profiles::load_projects(&s.store, "work", &saved.projects).unwrap();
+    assert!(problems.is_empty(), "{problems:?}");
+    assert_eq!(projects[0].credentials(), &expected);
+
+    // Статус показывает проект с маской идентификатора и проверяет его токен (клиента
+    // команды метод получения токена здесь не знает, поэтому статус — с ошибкой).
+    let mut ui = ScriptedUi::default();
+    status(
+        &s.store,
+        &s.repo,
+        Some(&verifier),
+        &mut ui,
+        &status_args(Some("work"), true),
+    )
+    .await
+    .unwrap_err();
+    let out = ui.text();
+    assert!(
+        out.contains(&format!("Projects:     {PROJECT}: client 10***j1, stored")),
+        "{out}"
+    );
+    assert!(out.contains("token ok"), "{out}");
+    assert_clean(&out, "prj1");
+
+    // Удаление проекта — из хранилища и из профиля; повтор — не ошибка.
+    let mut ui = ScriptedUi::default();
+    project_remove(&s.store, &s.repo, &mut ui, "work", PROJECT).unwrap();
+    assert!(
+        ui.text().contains("removed from the system keychain"),
+        "{}",
+        ui.text()
+    );
+    assert!(s.store.get_project("work", PROJECT).is_err());
+    assert!(s.repo.get("work").unwrap().unwrap().projects.is_empty());
+    let mut ui = ScriptedUi::default();
+    project_remove(&s.store, &s.repo, &mut ui, "work", PROJECT).unwrap();
+    assert!(
+        ui.text().contains("No project-level API client"),
+        "{}",
+        ui.text()
+    );
+    assert_eq!(s.store.get("work").unwrap(), credentials("team"));
+}
+
+/// `auth project add --credential-file`: текст ошибки и вывод.
+async fn add_file(
+    s: &Setup,
+    verifier: &Verifier,
+    file: PathBuf,
+    project_id: Option<&str>,
+) -> (String, String) {
+    let args = ProjectAddArgs {
+        credential_file: Some(file.clone()),
+        project_id: project_id.map(str::to_owned),
+        ..project_args("work")
+    };
+    let mut ui = ScriptedUi::default();
+    let result = project_add(
+        &s.store,
+        &s.repo,
+        Some(verifier),
+        &mut ui,
+        &args,
+        ProjectSource::CredentialFile(&file),
+    )
+    .await;
+    (format!("{:#}", result.unwrap_err()), ui.text())
+}
+
+#[tokio::test]
+async fn project_add_stores_nothing_when_the_token_fails_or_the_file_is_wrong() {
+    let s = setup();
+    with_team_profile(&s);
+    // Метод получения токена знает только другой клиент и отражает секрет в отказе.
+    let server = token_server(&credentials("other")).await;
+    let verifier = Verifier::with_base_url(&server.uri());
+    let (err, out) = add_file(
+        &s,
+        &verifier,
+        credential_file(&s, "bad1", "project_client_id", "RU"),
+        None,
+    )
+    .await;
+    assert!(err.contains("Nothing was stored"), "{err}");
+    assert!(err.contains("code 203817914"), "{err}");
+    assert_clean(&err, "bad1");
+    assert_clean(&out, "bad1");
+
+    // Файл клиента команды, другой регион, чужой проект, испорченный файл.
+    let (err, _) = add_file(
+        &s,
+        &verifier,
+        credential_file(&s, "bad2", "team_client_id", "RU"),
+        None,
+    )
+    .await;
+    assert!(err.contains("team-level API client"), "{err}");
+    let (err, _) = add_file(
+        &s,
+        &verifier,
+        credential_file(&s, "bad3", "project_client_id", "DE"),
+        None,
+    )
+    .await;
+    assert!(err.contains("data processing location is de"), "{err}");
+    let (err, _) = add_file(
+        &s,
+        &verifier,
+        credential_file(&s, "bad4", "project_client_id", "RU"),
+        Some("999"),
+    )
+    .await;
+    assert!(err.contains("does not match the project"), "{err}");
+    let broken = s.secret_file(
+        "agc-apiclient-broken.json",
+        &format!(
+            "{{\"type\": \"project_client_id\", \"client_secret\": \"{}\"",
+            client_secret("bad5")
+        ),
+    );
+    let (err, _) = add_file(&s, &verifier, broken, None).await;
+    assert!(err.contains("cannot be used: not a usable"), "{err}");
+    assert_clean(&err, "bad5");
+
+    for tag in ["bad1", "bad2", "bad3", "bad4", "bad5"] {
+        assert_clean(&format!("{:?}", s.repo.list().unwrap()), tag);
+    }
+    assert!(matches!(
+        s.store.get_project("work", PROJECT),
+        Err(StoreError::ProjectNotFound { .. })
+    ));
+    assert!(s.repo.get("work").unwrap().unwrap().projects.is_empty());
+    // Токен запрашивался только для первого файла: остальные отклонены до запроса.
+    assert_eq!(server.received_requests().await.unwrap().len(), 1);
+}
+
+#[tokio::test]
+async fn project_add_with_client_id_and_secret_and_logout() {
+    let s = setup();
+    let expected = credentials("prj2");
+    let server = token_server(&expected).await;
+    let verifier = Verifier::with_base_url(&server.uri());
+    let secret_file = s.secret_file(
+        "project-secret.txt",
+        &format!("{}\n", client_secret("prj2")),
+    );
+    let args = ProjectAddArgs {
+        project_id: Some(format!(" {PROJECT} ")),
+        client_id: Some(client_id("prj2")),
+        secret_file: Some(secret_file.clone()),
+        ..project_args("work")
+    };
+    // Профиля ещё нет: сначала `auth login`.
+    let source = || ProjectSource::Secret(SecretSource::File(&secret_file));
+    let err = project_add(
+        &s.store,
+        &s.repo,
+        Some(&verifier),
+        &mut ScriptedUi::default(),
+        &args,
+        source(),
+    )
+    .await
+    .unwrap_err();
+    assert!(
+        err.to_string().contains("auth login --profile work"),
+        "{err}"
+    );
+    assert!(s.store.get_project("work", PROJECT).is_err());
+
+    with_team_profile(&s);
+    let mut ui = ScriptedUi::default();
+    project_add(&s.store, &s.repo, Some(&verifier), &mut ui, &args, source())
+        .await
+        .unwrap();
+    assert_clean(&ui.text(), "prj2");
+    assert_eq!(s.store.get_project("work", PROJECT).unwrap(), expected);
+    // Без --project-id и без файла — ошибка до вопросов.
+    let err = project_add(
+        &s.store,
+        &s.repo,
+        None,
+        &mut ScriptedUi::default(),
+        &ProjectAddArgs {
+            client_id: Some(client_id("prj2")),
+            ..project_args("work")
+        },
+        ProjectSource::Secret(SecretSource::Prompt),
+    )
+    .await
+    .unwrap_err();
+    assert!(err.to_string().contains("--credential-file"), "{err}");
+    // Секрет аргументом не принимается.
+    let err = project_add(
+        &s.store,
+        &s.repo,
+        None,
+        &mut ScriptedUi::default(),
+        &ProjectAddArgs {
+            secret_argument: Some(Discarded),
+            ..project_args("work")
+        },
+        ProjectSource::Secret(SecretSource::Prompt),
+    )
+    .await
+    .unwrap_err();
+    assert!(err.to_string().contains("not accepted"), "{err}");
+
+    // Статус без записи проекта — не готов, с командой `auth project add`.
+    s.store.delete_project("work", PROJECT).unwrap();
+    let err = status(
+        &s.store,
+        &s.repo,
+        None,
+        &mut ScriptedUi::default(),
+        &status_args(Some("work"), false),
+    )
+    .await
+    .unwrap_err();
+    let text = err.to_string();
+    assert!(
+        text.contains(&format!(
+            "auth project add --profile work --project-id {PROJECT}"
+        )),
+        "{text}"
+    );
+    assert!(!text.contains("auth login"), "{text}");
+
+    // Выход удаляет и клиентов проектов.
+    s.store.set_project("work", PROJECT, &expected).unwrap();
+    let mut ui = ScriptedUi::default();
+    logout(&s.store, &s.repo, &Verifier::new(), &mut ui, "work", false)
+        .await
+        .unwrap();
+    assert!(s.store.get_project("work", PROJECT).is_err());
+    assert!(!s.store.contains("work").unwrap());
+    assert!(
+        ui.text().contains(&format!("project `{PROJECT}` removed")),
+        "{}",
+        ui.text()
+    );
 }

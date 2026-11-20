@@ -30,8 +30,13 @@ pub const SECRET_KEYS: &[&str] = &[
     "access_token",
     "accessToken",
     "refresh_token",
+    "refreshToken",
+    "id_token",
+    "idToken",
     "oauth2Token",
     "authCode",
+    "authorization_code",
+    "code_verifier",
     "appSecret",
     "app_secret",
     "Authorization",
@@ -362,6 +367,24 @@ mod tests {
         assert_eq!(
             scrub_secrets(&format!("{{\"Authorization\":\"OBS {s}:{s}\"}}")),
             "{\"Authorization\":\"***\"}"
+        );
+        // Поля входа пользователя (HUAWEI ID).
+        for key in [
+            "refreshToken",
+            "id_token",
+            "idToken",
+            "code_verifier",
+            "oauth2Token",
+        ] {
+            assert_eq!(
+                scrub_secrets(&format!("{{\"{key}\":\"{s}\"}}")),
+                format!("{{\"{key}\":\"***\"}}"),
+                "{key}"
+            );
+        }
+        assert_eq!(
+            scrub_secrets(&format!("grant_type=refresh_token&refresh_token={s}")),
+            "grant_type=refresh_token&refresh_token=***"
         );
         // Не поле: часть другого слова или нет разделителя.
         assert_eq!(scrub_secrets("myauthCodes=1"), "myauthCodes=1");

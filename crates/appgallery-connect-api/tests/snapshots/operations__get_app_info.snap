@@ -4,6 +4,10 @@ expression: "snapshot_view(op(\"get_app_info\"))"
 ---
 {
   "access": "read",
+  "auth_modes": [
+    "api-client",
+    "oauth-client"
+  ],
   "body": null,
   "description": "Without lang the listings in all languages are returned. releaseType selects the full release (1) or the phased release (3) version of the data. appInfo.releaseState holds the review and release status of the version.",
   "group": "publishing",

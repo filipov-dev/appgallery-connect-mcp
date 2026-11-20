@@ -1,14 +1,17 @@
 //! Бинарник `appgallery-connect-mcp`: CLI и stdio-транспорт MCP-сервера AppGallery Connect.
 //!
-//! Подкоманды: `auth` (учётные данные API-клиентов и профили), `connect` (регистрация
-//! сервера в MCP-клиенте), `serve` (MCP-сервер через stdio), `tools` (инструменты сервера и
+//! Подкоманды: `auth` (учётные данные API-клиентов и профили), `key exec` (учётные данные
+//! профиля временным файлом для другой команды), `connect` (регистрация сервера в
+//! MCP-клиенте), `serve` (MCP-сервер через stdio), `tools` (инструменты сервера и
 //! `tools.toml`), `toolsets` (наборы) и скрытая `jq-worker` (фильтр `jq` для `serve`).
 //!
 //! Вывод команд — в stdout, ошибки и диагностика — в stderr.
 
+mod browser;
 mod cli;
 mod clients;
 mod login;
+mod oauth_login;
 mod profiles;
 mod ui;
 mod verify;
@@ -18,6 +21,7 @@ use std::process::ExitCode;
 use clap::{Parser, Subcommand};
 
 use crate::cli::auth::AuthCommand;
+use crate::cli::key::KeyCommand;
 use crate::cli::serve::ServeArgs;
 use crate::cli::tools::ToolsCommand;
 use crate::cli::toolsets::ToolsetsArgs;
@@ -32,10 +36,13 @@ struct Cli {
 
 #[derive(Debug, Subcommand)]
 enum Command {
-    /// Manage the AppGallery Connect API clients of the profiles.
+    /// Manage the AppGallery Connect API clients and user sign-ins of the profiles.
     #[command(subcommand)]
     Auth(AuthCommand),
-    /// Run the MCP server over stdio with the API client of a profile.
+    /// Pass the API client credentials of a profile to other tools (Gradle, fastlane).
+    #[command(subcommand)]
+    Key(KeyCommand),
+    /// Run the MCP server over stdio with the API client or user sign-in of a profile.
     Serve(ServeArgs),
     /// Register the server in an MCP client (Claude Code or Codex) for a profile.
     ///
@@ -60,6 +67,7 @@ async fn run(cli: Cli) -> anyhow::Result<ExitCode> {
             cli::auth::run(command).await?;
             Ok(ExitCode::SUCCESS)
         }
+        Command::Key(command) => cli::key::run(command).await,
         Command::Serve(args) => {
             cli::serve::run(args).await?;
             Ok(ExitCode::SUCCESS)
@@ -96,7 +104,7 @@ async fn main() -> ExitCode {
 mod testing {
     use appgallery_connect_api::ApiClientCredentials;
     use serde_json::json;
-    use wiremock::matchers::{body_partial_json, method, path};
+    use wiremock::matchers::{body_partial_json, body_string_contains, header, method, path};
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
     /// Путь метода получения токена.
@@ -119,6 +127,80 @@ mod testing {
 
     pub fn credentials(tag: &str) -> ApiClientCredentials {
         ApiClientCredentials::from_parts(client_id(tag), client_secret(tag)).unwrap()
+    }
+
+    /// Выдуманный вход пользователя (OAuth-клиент с секретом и refresh token).
+    pub fn sign_in(tag: &str) -> appgallery_connect_api::OAuthCredentials {
+        appgallery_connect_api::OAuthCredentials::new(
+            appgallery_connect_api::OAuthClient::new(
+                appgallery_connect_api::ClientId::new(oauth_client_id(tag)).unwrap(),
+                Some(appgallery_connect_api::ClientSecret::new(client_secret(tag)).unwrap()),
+            ),
+            &refresh_token(tag),
+            appgallery_connect_api::user_oauth::requested_scopes(&[]).unwrap(),
+        )
+        .unwrap()
+    }
+
+    /// Выдуманный client ID OAuth-клиента (идентификатор приложения).
+    pub fn oauth_client_id(tag: &str) -> String {
+        ["1077", "0042", tag].concat()
+    }
+
+    /// Выдуманный refresh token, собранный из частей.
+    pub fn refresh_token(tag: &str) -> String {
+        ["DQ", "Ej", "rT", "-refresh-", tag, "-0123456789"].concat()
+    }
+
+    /// Выдуманный access token пользователя.
+    pub fn user_access_token() -> String {
+        ["CV", "user", "-access-", "0123456789"].concat()
+    }
+
+    /// Путь списка команд пользователя.
+    pub const TEAM_LIST_PATH: &str = "/api/ups/user-permission-service/v1/user-team-list";
+
+    /// Сервер входа HUAWEI ID на `server` (`/oauth2/v3/...`, как у `Verifier::with_base_url`):
+    /// обмен кода `test-code` выдаёт `refresh_token(tag)`, обновление по нему — access token,
+    /// список команд с этим токеном — `teams`.
+    pub async fn mount_user_sign_in(server: &MockServer, tag: &str, teams: serde_json::Value) {
+        Mock::given(method("POST"))
+            .and(path("/oauth2/v3/token"))
+            .and(body_string_contains("grant_type=authorization_code"))
+            .and(body_string_contains("code=test-code"))
+            .and(body_string_contains("code_verifier="))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "access_token": user_access_token(),
+                "expires_in": 3600,
+                "refresh_token": refresh_token(tag),
+                "scope": "openid https://www.huawei.com/auth/agc/publish https://www.huawei.com/auth/agc/project",
+                "token_type": "Bearer",
+            })))
+            .mount(server)
+            .await;
+        Mock::given(method("POST"))
+            .and(path("/oauth2/v3/token"))
+            .and(body_string_contains("grant_type=refresh_token"))
+            .and(body_string_contains(format!(
+                "refresh_token={}",
+                refresh_token(tag)
+            )))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "access_token": user_access_token(),
+                "expires_in": 3600,
+                "token_type": "Bearer",
+            })))
+            .mount(server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path(TEAM_LIST_PATH))
+            .and(header("oauth2Token", user_access_token().as_str()))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "ret": {"code": 0, "msg": "success"},
+                "teams": teams,
+            })))
+            .mount(server)
+            .await;
     }
 
     /// Метод получения токена, который выдаёт токен только для `credentials`.
@@ -166,6 +248,73 @@ mod tests {
     #[test]
     fn cli_is_consistent() {
         Cli::command().debug_assert();
+    }
+
+    #[test]
+    fn parses_auth_project_commands() {
+        use crate::cli::auth::ProjectCommand;
+        let cli = Cli::try_parse_from([
+            "appgallery-connect-mcp",
+            "auth",
+            "project",
+            "add",
+            "--profile",
+            "work",
+            "--credential-file",
+            "agc-apiclient-1.json",
+        ])
+        .unwrap();
+        let Command::Auth(AuthCommand::Project(ProjectCommand::Add(args))) = cli.command else {
+            panic!("expected auth project add");
+        };
+        assert_eq!(args.profile.profile, "work");
+        assert!(args.credential_file.is_some() && args.project_id.is_none());
+
+        let cli = Cli::try_parse_from([
+            "appgallery-connect-mcp",
+            "auth",
+            "project",
+            "add",
+            "--project-id",
+            "100",
+            "--client-id",
+            "1",
+            "--secret-stdin",
+        ])
+        .unwrap();
+        let Command::Auth(AuthCommand::Project(ProjectCommand::Add(args))) = cli.command else {
+            panic!("expected auth project add");
+        };
+        assert_eq!(args.project_id.as_deref(), Some("100"));
+        assert!(args.secret_stdin);
+
+        // Файл ключа не сочетается с идентификатором и секретом клиента.
+        for bad in [
+            &["--credential-file", "a.json", "--client-id", "1"][..],
+            &["--credential-file", "a.json", "--secret-file", "s.txt"],
+            &["--secret-stdin"],
+        ] {
+            let mut argv = vec!["appgallery-connect-mcp", "auth", "project", "add"];
+            argv.extend_from_slice(bad);
+            assert!(Cli::try_parse_from(argv).is_err(), "{bad:?}");
+        }
+
+        let cli = Cli::try_parse_from([
+            "appgallery-connect-mcp",
+            "auth",
+            "project",
+            "remove",
+            "--project-id",
+            "100",
+        ])
+        .unwrap();
+        let Command::Auth(AuthCommand::Project(ProjectCommand::Remove(args))) = cli.command else {
+            panic!("expected auth project remove");
+        };
+        assert_eq!(args.project_id, "100");
+        assert!(
+            Cli::try_parse_from(["appgallery-connect-mcp", "auth", "project", "remove"]).is_err()
+        );
     }
 
     #[test]
@@ -265,6 +414,55 @@ mod tests {
             panic!("expected auth logout");
         };
         assert_eq!(args.profile.profile, "work");
+    }
+
+    #[test]
+    fn parses_key_exec() {
+        let cli = Cli::try_parse_from([
+            "appgallery-connect-mcp",
+            "key",
+            "exec",
+            "--profile",
+            "work",
+            "--format",
+            "dotenv",
+            "--env",
+            "AGC_FILE",
+            "--",
+            "fastlane",
+            "--profile",
+            "x",
+        ])
+        .unwrap();
+        let Command::Key(KeyCommand::Exec(args)) = cli.command else {
+            panic!("expected key exec");
+        };
+        assert_eq!(args.profile.profile, "work");
+        assert_eq!(args.format, cli::key::FileFormat::Dotenv);
+        assert_eq!(args.env, ["AGC_FILE"]);
+        assert_eq!(args.command, ["fastlane", "--profile", "x"]);
+
+        let cli =
+            Cli::try_parse_from(["appgallery-connect-mcp", "key", "exec", "--", "true"]).unwrap();
+        let Command::Key(KeyCommand::Exec(args)) = cli.command else {
+            panic!("expected key exec");
+        };
+        assert_eq!(args.format, cli::key::FileFormat::Json);
+        assert!(args.env.is_empty());
+        // Без команды и с неизвестным форматом — ошибка разбора.
+        assert!(Cli::try_parse_from(["appgallery-connect-mcp", "key", "exec"]).is_err());
+        assert!(
+            Cli::try_parse_from([
+                "appgallery-connect-mcp",
+                "key",
+                "exec",
+                "--format",
+                "xml",
+                "--",
+                "true"
+            ])
+            .is_err()
+        );
     }
 
     #[test]

@@ -4,6 +4,9 @@ expression: "snapshot_view(op(\"reply_review\"))"
 ---
 {
   "access": "destructive",
+  "auth_modes": [
+    "api-client"
+  ],
   "body": "Json",
   "description": "The reply is visible to AppGallery users. Pass toReplyId to answer a specific user reply or updateReplyId to change an existing developer reply, not both. The requestId header is a unique request ID chosen by the caller, up to 64 characters.\n\nDestructive: publishes a reply that all AppGallery users see.",
   "group": "comments",
