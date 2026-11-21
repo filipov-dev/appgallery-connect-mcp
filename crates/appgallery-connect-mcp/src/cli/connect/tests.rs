@@ -4,9 +4,9 @@
 //! данные выдуманы и собраны из частей.
 
 use std::fs;
-use std::path::Path;
 
 use appgallery_connect_api::MemoryStore;
+use mcp_kit::approval::testing::{FakePresence, MemoryStore as MemoryApprovals};
 use wiremock::MockServer;
 
 use super::*;
@@ -30,6 +30,8 @@ struct Fixture {
     runner: FakeRunner,
     ui: ScriptedUi,
     codex_home: PathBuf,
+    /// Одобрение прав, как на macOS; `None` — как на Linux и Windows.
+    approval: Option<(MemoryApprovals, FakePresence)>,
 }
 
 impl Fixture {
@@ -43,6 +45,7 @@ impl Fixture {
             runner: FakeRunner::default(),
             ui: ScriptedUi::default(),
             codex_home: dir.path().join("codex"),
+            approval: None,
             dir,
         }
     }
@@ -82,7 +85,12 @@ impl Fixture {
             (None, true) => SecretSource::Reader(&mut reader),
             (None, false) => SecretSource::Prompt,
         };
+        let approval = self
+            .approval
+            .as_ref()
+            .map(|(store, presence)| (store as &dyn ApprovalStore, presence as &dyn Presence));
         let mut env = ConnectEnv {
+            approval,
             store: &self.store,
             repo: &self.repo,
             verifier: (!self.no_verify).then_some(&verifier),
@@ -215,6 +223,8 @@ async fn first_codex_run_with_flags_stores_credentials_and_writes_config() {
     assert_eq!(settings.apps, ["100000001"]);
     assert_eq!(settings.client.as_deref(), Some("codex"));
     assert!(settings.allow_write && !settings.allow_destructive);
+    // Каталоги — в правах профиля, канонизированные и без повторов.
+    assert_eq!(settings.allow_path, [builds.canonicalize().unwrap()]);
     assert_eq!(settings.toolsets, ["apps", "releases"]);
     assert!(settings.dynamic_toolsets);
 
@@ -227,12 +237,9 @@ async fn first_codex_run_with_flags_stores_credentials_and_writes_config() {
             "serve",
             "--profile",
             "default",
-            "--allow-write",
             "--toolsets",
             "apps,releases",
-            "--dynamic-toolsets",
-            "--allow-path",
-            builds.to_str().unwrap()
+            "--dynamic-toolsets"
         ]
     );
     // В записи клиента только команда и аргументы: ни `env`, ни секрета.
@@ -353,14 +360,7 @@ async fn rerun_reuses_working_credentials_and_changes_nothing_the_second_time() 
     let config = fx.codex_config().unwrap();
     assert_eq!(
         codex_entry(&config, "appgallery").1,
-        [
-            "serve",
-            "--profile",
-            "default",
-            "--allow-write",
-            "--allow-destructive",
-            "--dynamic-toolsets"
-        ]
+        ["serve", "--profile", "default", "--dynamic-toolsets"]
     );
 
     // Ещё раз без терминала и без --yes: без вопросов, конфиг не меняется.
@@ -412,14 +412,9 @@ async fn no_verify_stores_unchecked_credentials() {
 }
 
 #[tokio::test]
-async fn access_flag_combinations() {
-    let cases: [(bool, bool, &[&str]); 4] = [
-        (false, false, &[]),
-        (true, false, &["--allow-write"]),
-        (false, true, &["--allow-write", "--allow-destructive"]),
-        (true, true, &["--allow-write", "--allow-destructive"]),
-    ];
-    for (write, destructive, flags) in cases {
+async fn access_flags_change_the_profile_not_the_registration() {
+    let cases = [(false, false), (true, false), (false, true), (true, true)];
+    for (write, destructive) in cases {
         let mut fx = Fixture::new().await.with_stored(DEFAULT_PROFILE, GOOD);
         let mut args = args(ClientKind::Codex);
         args.allow_write = write;
@@ -431,12 +426,82 @@ async fn access_flag_combinations() {
         assert_eq!(settings.allow_write, write || destructive);
         assert_eq!(settings.allow_destructive, destructive);
 
-        let mut expected = vec!["serve", "--profile", "default"];
-        expected.extend_from_slice(flags);
-        expected.push("--dynamic-toolsets");
         let config = fx.codex_config().unwrap();
-        assert_eq!(codex_entry(&config, "appgallery").1, expected);
+        assert_eq!(
+            codex_entry(&config, "appgallery").1,
+            ["serve", "--profile", "default", "--dynamic-toolsets"]
+        );
     }
+
+    // Без флагов права профиля не меняются.
+    let mut fx = Fixture::new().await.with_stored(DEFAULT_PROFILE, GOOD);
+    let mut settings = fx.settings(DEFAULT_PROFILE);
+    settings.allow_write = true;
+    settings.allow_path = vec![fx.dir.path().to_path_buf()];
+    fx.repo.upsert(DEFAULT_PROFILE, settings.clone()).unwrap();
+    let mut args = args(ClientKind::Codex);
+    args.yes = true;
+    fx.connect(&args).await.unwrap();
+    let after = fx.settings(DEFAULT_PROFILE);
+    assert!(after.allow_write && !after.allow_destructive);
+    assert_eq!(after.allow_path, settings.allow_path);
+
+    // Только --allow-path: уровень прежний, каталоги новые.
+    let builds = fx.dir.path().join("builds");
+    fs::create_dir(&builds).unwrap();
+    args.allow_paths = vec![builds.clone()];
+    fx.connect(&args).await.unwrap();
+    let after = fx.settings(DEFAULT_PROFILE);
+    assert!(after.allow_write && !after.allow_destructive);
+    assert_eq!(after.allow_path, [builds.canonicalize().unwrap()]);
+}
+
+#[tokio::test]
+async fn raising_access_needs_approval_on_macos() {
+    let mut fx = Fixture::new().await.with_stored(DEFAULT_PROFILE, GOOD);
+    fx.approval = Some((MemoryApprovals::default(), FakePresence::new(false)));
+    let mut args = args(ClientKind::Codex);
+    args.allow_destructive = true;
+    args.yes = true;
+    fx.connect(&args).await.unwrap();
+    // Отказ: права прежние, но профиль и регистрация сохранены.
+    let settings = fx.settings(DEFAULT_PROFILE);
+    assert!(!settings.allow_write && !settings.allow_destructive);
+    let text = fx.ui.text();
+    assert!(text.contains("The access was not changed"), "{text}");
+    assert!(
+        text.contains(&format!(
+            "`appgallery-connect-mcp ui` (profile `{DEFAULT_PROFILE}`)"
+        )),
+        "{text}"
+    );
+    assert_eq!(settings.client.as_deref(), Some("codex"));
+    assert!(fx.codex_config().is_some());
+
+    fx.approval = Some((MemoryApprovals::default(), FakePresence::new(true)));
+    fx.ui = ScriptedUi::default();
+    fx.connect(&args).await.unwrap();
+    assert!(fx.settings(DEFAULT_PROFILE).allow_destructive);
+    let (approvals, presence) = fx.approval.as_ref().unwrap();
+    assert_eq!(presence.asked.get(), 1);
+    assert_eq!(
+        approvals.load(DEFAULT_PROFILE).unwrap().unwrap().level,
+        AccessLevel::Destructive
+    );
+    assert!(
+        fx.ui.text().contains("approved on this Mac"),
+        "{}",
+        fx.ui.text()
+    );
+
+    // Понижение — без запроса.
+    args.allow_destructive = false;
+    args.allow_write = true;
+    fx.ui = ScriptedUi::default();
+    fx.connect(&args).await.unwrap();
+    let settings = fx.settings(DEFAULT_PROFILE);
+    assert!(settings.allow_write && !settings.allow_destructive);
+    assert_eq!(fx.approval.as_ref().unwrap().1.asked.get(), 1);
 }
 
 #[tokio::test]
@@ -478,6 +543,7 @@ async fn silent_mode_asks_nothing_and_writes_the_config() {
             ui: &mut ui,
             exe: PathBuf::from(TEST_EXE),
             codex_home: fx.codex_home.clone(),
+            approval: None,
         };
         connect(&mut env, &silent, SecretSource::Prompt)
             .await
@@ -499,6 +565,7 @@ async fn silent_mode_asks_nothing_and_writes_the_config() {
         ui: &mut ui,
         exe: PathBuf::from(TEST_EXE),
         codex_home: fx.codex_home.clone(),
+        approval: None,
     };
     connect(&mut env, &silent, SecretSource::File(&path))
         .await
@@ -572,7 +639,7 @@ async fn dry_run_changes_nothing() {
         text.contains("connect would ask for the client ID and secret"),
         "{text}"
     );
-    assert!(text.contains("would get access read and write"), "{text}");
+    assert!(text.contains("would get access `write`"), "{text}");
     assert!(text.contains("[mcp_servers.appgallery]"), "{text}");
     assert!(text.contains("Dry run: nothing was changed"), "{text}");
     assert!(fx.ui.questions.is_empty());
@@ -642,7 +709,6 @@ async fn claude_flow_registers_only_the_serve_command() {
                         "serve",
                         "--profile",
                         "work",
-                        "--allow-write",
                         "--toolsets",
                         "reviews",
                         "--dynamic-toolsets"
@@ -732,7 +798,7 @@ async fn claude_missing_cli_fails_before_questions() {
 fn relative_allow_path_becomes_absolute() {
     let paths = normalize_allow_paths(&[PathBuf::from(".")]).unwrap();
     assert_eq!(paths.len(), 1);
-    assert!(Path::new(&paths[0]).is_absolute(), "{paths:?}");
+    assert!(paths[0].is_absolute(), "{paths:?}");
 }
 
 #[tokio::test]

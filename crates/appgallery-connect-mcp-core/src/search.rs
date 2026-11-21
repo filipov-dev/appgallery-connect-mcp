@@ -87,8 +87,8 @@ pub fn api_search_tool(http: bool) -> Tool {
         "an access token with a higher level or other toolsets from the server operator, or a \
          call with `api_request`"
     } else {
-        "the --allow-write or --allow-destructive flag, the --toolsets option, or a call with \
-         `api_request`"
+        "write or destructive access for the server's profile (`appgallery-connect-mcp \
+         ui`), the --toolsets option, or a call with `api_request`"
     };
     let description = format!(
         "Search all AppGallery Connect API operations by words in English or Russian (tool \
@@ -777,14 +777,14 @@ mod tests {
         assert_eq!(found["toolset"], "reviews");
         assert_eq!(found["access"], "destructive");
         let status = found["status"].as_str().unwrap();
-        assert!(status.contains("--allow-destructive"), "{status}");
+        assert!(status.contains("destructive access"), "{status}");
         assert!(!status.contains("call it now"), "{status}");
 
         let result = run(&registry, json!({"query": "update app info"}));
         let status = entry(&result, "update_app_info")["status"]
             .as_str()
             .unwrap();
-        assert!(status.contains("--allow-write"), "{status}");
+        assert!(status.contains("write access"), "{status}");
 
         // Набор не включён: `--toolsets` или сразу `api_request`.
         let result = run(&registry, json!({"query": "list packages"}));
@@ -850,7 +850,7 @@ mod tests {
             api_search_tool(false)
                 .description
                 .unwrap()
-                .contains("--allow-write")
+                .contains("write or destructive access")
         );
     }
 
@@ -907,7 +907,7 @@ mod tests {
     fn describes_one_tool() {
         let registry = registry(AccessLevel::Read, None);
         let result = run(&registry, json!({"tool_name": "update_app_language_info"}));
-        assert!(result["status"].as_str().unwrap().contains("--allow-write"));
+        assert!(result["status"].as_str().unwrap().contains("write access"));
         assert!(result["input_schema"]["properties"].get("body").is_some());
         assert!(result["input_schema"]["properties"].get("appId").is_some());
         assert_eq!(result["method"], "PUT");

@@ -553,27 +553,32 @@ pub fn access_name(access: AccessLevel) -> &'static str {
     }
 }
 
-/// Флаг сервера, который включает уровень доступа `access`.
-pub fn access_flag(access: AccessLevel) -> &'static str {
+/// Как пользователь включает уровень `access` в stdio: права — настройка профиля (флаги
+/// регистрации их не расширяют), на macOS повышение ещё и одобряется Touch ID. Фраза
+/// продолжает «ask the user to …».
+fn profile_access_step(access: AccessLevel) -> String {
     match access {
-        AccessLevel::Read => "no extra flag",
-        AccessLevel::Write => "--allow-write",
-        AccessLevel::Destructive => "--allow-destructive",
+        AccessLevel::Read => "keep the read-only access".to_owned(),
+        level => format!(
+            "allow {} access for the server's profile with `appgallery-connect-mcp ui` and \
+             restart the MCP client",
+            access_name(level)
+        ),
     }
 }
 
-/// Что даёт уровень доступа `access`, для вставки в сообщение («needs …»): в stdio — сервер,
-/// запущенный с флагом, в HTTP-режиме — токен доступа с этим уровнем.
+/// Что даёт уровень доступа `access`, для вставки в сообщение («needs …»): в stdio — права
+/// профиля сервера, в HTTP-режиме — токен доступа с этим уровнем.
 pub fn access_requirement(access: AccessLevel, http: bool) -> String {
     if http {
         format!("an access token with the {} level", access_name(access))
     } else {
-        format!("a server started with {}", access_flag(access))
+        format!("{} access for the server's profile", access_name(access))
     }
 }
 
-/// Как получить уровень доступа `access`: в stdio — перезапуск сервера с флагом, в
-/// HTTP-режиме — токен доступа с этим уровнем от оператора сервера.
+/// Как получить уровень доступа `access`: в stdio — права профиля (`ui`) и перезапуск
+/// клиента, в HTTP-режиме — токен доступа с этим уровнем от оператора сервера.
 pub fn access_hint(access: AccessLevel, http: bool) -> String {
     if http {
         format!(
@@ -582,8 +587,8 @@ pub fn access_hint(access: AccessLevel, http: bool) -> String {
         )
     } else {
         format!(
-            "Ask the user to restart the server with {} if this change is intended",
-            access_flag(access)
+            "Ask the user to {} if this change is intended",
+            profile_access_step(access)
         )
     }
 }
@@ -596,10 +601,7 @@ pub fn access_action(access: AccessLevel, http: bool) -> String {
             access_name(access)
         )
     } else {
-        format!(
-            "ask the user to restart the server with {}",
-            access_flag(access)
-        )
+        format!("ask the user to {}", profile_access_step(access))
     }
 }
 
@@ -817,9 +819,9 @@ mod tests {
     fn unavailable_reasons_name_the_flag_or_toolset() {
         let read = ToolRegistry::new(&options(AccessLevel::Read, all())).unwrap();
         let reason = read.unavailable_reason("update_app_info").unwrap();
-        assert!(reason.contains("--allow-write"), "{reason}");
+        assert!(reason.contains("write access"), "{reason}");
         let reason = read.unavailable_reason("submit_app").unwrap();
-        assert!(reason.contains("--allow-destructive"), "{reason}");
+        assert!(reason.contains("destructive access"), "{reason}");
         assert!(read.unavailable_reason("list_reviews").is_none());
         assert!(read.unavailable_reason("no_such_tool").is_none());
 
@@ -914,7 +916,7 @@ mod tests {
         assert!(
             read.unavailable_reason("test_write")
                 .unwrap()
-                .contains("--allow-write")
+                .contains("write access")
         );
 
         let other = ToolRegistry::new(&ServerOptions {

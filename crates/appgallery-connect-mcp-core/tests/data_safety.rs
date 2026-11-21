@@ -824,7 +824,7 @@ fn instructions_describe_local_files_and_hidden_values() {
     .unwrap();
     let text = server.instructions();
     assert!(text.contains("- Local files: `save_to`"), "{text}");
-    assert!(text.contains("--allow-path"), "{text}");
+    assert!(text.contains("appgallery-connect-mcp ui"), "{text}");
     let root = dir.path().canonicalize().unwrap();
     let root = root.display().to_string();
     let shown = root.strip_prefix(r"\\?\").unwrap_or(&root);

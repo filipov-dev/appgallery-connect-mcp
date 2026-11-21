@@ -37,6 +37,7 @@ use super::products::{
 };
 use super::{CompositeTool, Context, ToolFuture};
 use crate::error::{ToolError, describe_api_error};
+use crate::registry::{access_action, access_hint, access_requirement};
 
 /// Имя инструмента.
 pub const NAME: &str = "products_apply";
@@ -53,7 +54,7 @@ new values) and its access level. Call again with dry_run false to apply. Levels
 and descriptions (also per language) and subscription group names are write changes; prices \
 (the default price and prices per country), creating a product, activating or deactivating \
 products, and creating, changing, releasing or removing promotions are destructive changes \
-(they affect what users pay) and need a server started with --allow-destructive: without it a \
+(they affect what users pay) and need a server with destructive access: without it a \
 plan with such changes is refused before anything is sent, with the list of them. Products, \
 promotions and groups that are not in the file are left as they are, and so are languages and \
 country prices missing from an entry. The file is checked before any request: amounts in minor \
@@ -992,10 +993,11 @@ async fn apply(ctx: &Context, args: Value) -> Result<Value, ToolError> {
     let force = bool_arg(&args, "force_existing_subscribers")?.unwrap_or(false);
     let country = country_arg(&args)?;
     if !dry_run && !ctx.access.allows(AccessLevel::Write) {
-        return Err(ToolError::new(
-            "applying the products file needs a server started with --allow-write; dry_run \
-             works without",
-        ));
+        return Err(ToolError::new(format!(
+            "applying the products file needs {}; dry_run works without. {}",
+            access_requirement(AccessLevel::Write, ctx.http),
+            access_hint(AccessLevel::Write, ctx.http)
+        )));
     }
     let file = read_file(ctx, path)?;
     let app_id = resolve_app_id(ctx, &args, &file)?;
@@ -1031,11 +1033,11 @@ async fn apply(ctx: &Context, args: Value) -> Result<Value, ToolError> {
         let list: Vec<&str> = destructive.iter().map(|c| c.label.as_str()).collect();
         return Err(ToolError::new(format!(
             "the products file needs changes of the destructive level (they affect what users \
-             pay or what they can buy), and this server was not started with \
-             --allow-destructive; nothing was sent. Destructive changes:\n- {}\n\nAsk the user \
-             to restart the server with --allow-destructive, or remove these changes from the \
+             pay or what they can buy), and this server runs with a lower access level; nothing \
+             was sent. Destructive changes:\n- {}\n\nEither {}, or remove these changes from the \
              file to apply the rest (names and descriptions)",
-            list.join("\n- ")
+            list.join("\n- "),
+            access_action(AccessLevel::Destructive, ctx.http)
         )));
     }
 
@@ -1099,9 +1101,10 @@ async fn apply(ctx: &Context, args: Value) -> Result<Value, ToolError> {
     let mut notes = Vec::new();
     if !destructive.is_empty() && !can_destroy {
         notes.push(format!(
-            "{} change(s) are of the destructive level and need a server started with \
-             --allow-destructive; applying this plan is refused on this server",
-            destructive.len()
+            "{} change(s) are of the destructive level and need {}; applying this plan is \
+             refused on this server",
+            destructive.len(),
+            access_requirement(AccessLevel::Destructive, ctx.http)
         ));
     }
     if !plan.kept.is_empty() {

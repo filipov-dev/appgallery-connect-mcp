@@ -3,7 +3,9 @@
 //!
 //! Один профиль — один API-клиент одного кабинета AppGallery Connect. В файле профилей нет
 //! ни секрета, ни идентификатора клиента: только регион, приложения по умолчанию,
-//! настройки доступа для `connect` и `serve` и список проектов, для которых в хранилище
+//! права профиля (уровень доступа и каталоги `allow_path`: флаги `serve` их только сужают,
+//! на macOS они ещё и сверяются с одобренными, см. [`mcp_kit::approval`]), наборы
+//! инструментов и список проектов, для которых в хранилище
 //! лежат API-клиенты уровня проекта (вторые учётные данные того же профиля, запись
 //! `<профиль>/project/<projectId>`; хранилище не умеет перечислять записи) и список
 //! приложений с секретом приложения в хранилище (запись `<профиль>/app/<appId>`: подпись
@@ -25,6 +27,7 @@ use appgallery_connect_api::{
     ApiClient, ApiClientCredentials, AppCredentials, ClientConfig, CredentialStore, KeyringStore,
     OAuthCredentials, OAuthSession, ProjectCredentials, Region, StoreError,
 };
+use mcp_kit::ProfileAccess;
 use serde::{Deserialize, Serialize};
 
 /// Переменная окружения, которая переопределяет каталог конфигурации (нужна для тестов).
@@ -95,10 +98,14 @@ pub struct ProfileSettings {
     /// MCP-клиент, в котором `connect` зарегистрировал профиль (`claude-code`, `codex`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub client: Option<String>,
-    /// Разрешены операции записи (`serve --allow-write`).
+    /// Разрешены операции записи (`serve --allow-write` только сужает).
     pub allow_write: bool,
-    /// Разрешены операции уровня удаления (`serve --allow-destructive`).
+    /// Разрешены операции уровня удаления (`serve --allow-destructive` только сужает).
     pub allow_destructive: bool,
+    /// Дополнительные каталоги для локальных файлов инструментов (`serve --allow-path`
+    /// только сужает их). Абсолютные пути.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub allow_path: Vec<PathBuf>,
     /// Включённые наборы инструментов (`serve --toolsets`); пустой список — набор по умолчанию.
     pub toolsets: Vec<String>,
     /// Наборы инструментов включаются агентом по запросу (`serve --dynamic-toolsets`).
@@ -129,6 +136,21 @@ impl ProfileSettings {
         self.app_secrets.sort();
         self.app_secrets.dedup();
         self
+    }
+
+    /// Права профиля: уровень доступа и каталоги. Флаги `serve` их только сужают, на macOS
+    /// они ещё и сверяются с одобренными (см. [`mcp_kit::approval`]).
+    pub fn access(&self) -> ProfileAccess {
+        ProfileAccess::new(
+            mcp_kit::AccessLevel::from_flags(self.allow_write, self.allow_destructive),
+            self.allow_path.clone(),
+        )
+    }
+
+    /// Записывает права в настройки.
+    pub fn set_access(&mut self, access: &ProfileAccess) {
+        (self.allow_write, self.allow_destructive) = access.level.to_flags();
+        self.allow_path = access.allow_path.clone();
     }
 }
 
@@ -552,11 +574,35 @@ mod tests {
             client: Some("codex".into()),
             allow_write: true,
             allow_destructive: false,
+            allow_path: vec![],
             toolsets: vec!["apps".into(), "releases".into()],
             dynamic_toolsets: true,
             projects: vec!["100".into()],
             app_secrets: vec!["100000001".into()],
         }
+    }
+
+    #[test]
+    fn access_round_trip() {
+        let dir = tempfile::tempdir().unwrap();
+        let repo = ProfileRepo::in_dir(dir.path());
+        let mut settings = sample();
+        assert_eq!(settings.access().level, mcp_kit::AccessLevel::Write);
+        let root = dir.path().join("files");
+        settings.set_access(&ProfileAccess::new(
+            mcp_kit::AccessLevel::Destructive,
+            vec![root.clone()],
+        ));
+        assert!(settings.allow_write && settings.allow_destructive);
+        repo.upsert("work", settings.clone()).unwrap();
+        let text = fs::read_to_string(repo.path()).unwrap();
+        assert!(text.contains("allow_path = ["), "{text}");
+        let loaded = repo.get("work").unwrap().unwrap();
+        assert_eq!(loaded.access().allow_path, vec![root]);
+        assert_eq!(loaded, settings.clone().normalized());
+        settings.set_access(&ProfileAccess::read_only());
+        assert!(!settings.allow_write && !settings.allow_destructive);
+        assert!(settings.allow_path.is_empty());
     }
 
     #[test]

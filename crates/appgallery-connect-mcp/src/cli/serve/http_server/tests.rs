@@ -66,7 +66,7 @@ fn try_parse(args: &[&str]) -> Result<ServeArgs, clap::Error> {
 }
 
 fn load(args: &[&str]) -> anyhow::Result<HttpSetup> {
-    HttpSetup::load(&try_parse(args).unwrap(), &MemoryStore::new(), None)
+    HttpSetup::load(&try_parse(args).unwrap(), &MemoryStore::new(), None, None)
 }
 
 /// Средства теста: временный каталог, файлы секрета и токенов.
@@ -672,6 +672,8 @@ fn credentials_and_settings_come_from_the_profile() {
         ProfileSettings {
             region: appgallery_connect_api::Region::Ru,
             apps: vec!["100000001".into()],
+            // Потолок прав сервера с учётными данными из хранилища — права профиля.
+            allow_write: true,
             ..ProfileSettings::default()
         },
     )
@@ -692,7 +694,7 @@ fn credentials_and_settings_come_from_the_profile() {
     };
 
     // Учётные данные из хранилища профиля, регион и приложения — из его настроек.
-    let setup = HttpSetup::load(&args(&[]), &store, Some(&repo)).unwrap();
+    let setup = HttpSetup::load(&args(&[]), &store, Some(&repo), None).unwrap();
     assert_eq!(setup.config.region, appgallery_connect_api::Region::Ru);
     assert_eq!(
         setup.config.credentials,
@@ -702,11 +704,29 @@ fn credentials_and_settings_come_from_the_profile() {
     // Нет учётных данных в хранилище — подсказка про вход.
     let err = format!(
         "{:#}",
-        HttpSetup::load(&args(&[]), &MemoryStore::new(), Some(&repo))
+        HttpSetup::load(&args(&[]), &MemoryStore::new(), Some(&repo), None)
             .err()
             .unwrap()
     );
     assert!(err.contains("auth login --profile ci"), "{err}");
+
+    // Флаг сверх прав профиля — ошибка запуска: HTTP-режим не расширяет права профиля.
+    let err = format!(
+        "{:#}",
+        HttpSetup::load(&args(&["--allow-destructive"]), &store, Some(&repo), None)
+            .err()
+            .unwrap()
+    );
+    assert!(err.contains("profile allows only `write`"), "{err}");
+    // На macOS без одобрения — только чтение, токен `write` не пройдёт.
+    let approvals = mcp_kit::approval::testing::MemoryStore::default();
+    let err = format!(
+        "{:#}",
+        HttpSetup::load(&args(&[]), &store, Some(&repo), Some(&approvals))
+            .err()
+            .unwrap()
+    );
+    assert!(err.contains("server runs with `read-only` access"), "{err}");
 
     // Файл секрета побеждает хранилище, --region — профиль; JSON несёт и идентификатор.
     use std::os::unix::fs::PermissionsExt;
@@ -717,6 +737,7 @@ fn credentials_and_settings_come_from_the_profile() {
         &args(&["--secret-file", json.to_str().unwrap(), "--region", "de"]),
         &store,
         Some(&repo),
+        None,
     )
     .unwrap();
     assert_eq!(setup.config.region, appgallery_connect_api::Region::De);
@@ -730,6 +751,7 @@ fn credentials_and_settings_come_from_the_profile() {
         &args(&["--secret-file", json.to_str().unwrap()]),
         &store,
         Some(&repo),
+        None,
     )
     .unwrap();
     assert_eq!(setup.config.region, appgallery_connect_api::Region::Ru);
@@ -754,7 +776,7 @@ fn secret_file_without_a_profile_needs_the_region() {
     for repo in [None, Some(&empty)] {
         let err = format!(
             "{:#}",
-            HttpSetup::load(&try_parse(&base).unwrap(), &MemoryStore::new(), repo)
+            HttpSetup::load(&try_parse(&base).unwrap(), &MemoryStore::new(), repo, None)
                 .err()
                 .unwrap()
         );
@@ -764,8 +786,13 @@ fn secret_file_without_a_profile_needs_the_region() {
     }
     let mut with_region = base.to_vec();
     with_region.extend(["--region", "sg"]);
-    let setup =
-        HttpSetup::load(&try_parse(&with_region).unwrap(), &MemoryStore::new(), None).unwrap();
+    let setup = HttpSetup::load(
+        &try_parse(&with_region).unwrap(),
+        &MemoryStore::new(),
+        None,
+        None,
+    )
+    .unwrap();
     assert_eq!(setup.config.region, appgallery_connect_api::Region::Sg);
 }
 
@@ -787,6 +814,7 @@ async fn user_sign_in_profile_serves_over_http() {
             kind: ProfileKind::Oauth,
             team_id: Some("5100".into()),
             region: Region::Ru,
+            allow_write: true,
             ..ProfileSettings::default()
         },
     )
@@ -807,7 +835,7 @@ async fn user_sign_in_profile_serves_over_http() {
     };
     let err = format!(
         "{:#}",
-        HttpSetup::load(&args(&["--region", "cn"]), &store, Some(&repo))
+        HttpSetup::load(&args(&["--region", "cn"]), &store, Some(&repo), None)
             .err()
             .unwrap()
     );
@@ -815,13 +843,13 @@ async fn user_sign_in_profile_serves_over_http() {
     // Нет входа в хранилище хоста — подсказка оператору про `auth login --oauth`.
     let err = format!(
         "{:#}",
-        HttpSetup::load(&args(&[]), &MemoryStore::new(), Some(&repo))
+        HttpSetup::load(&args(&[]), &MemoryStore::new(), Some(&repo), None)
             .err()
             .unwrap()
     );
     assert!(err.contains("auth login --oauth --profile guest"), "{err}");
 
-    let mut setup = HttpSetup::load(&args(&["--region", "ru"]), &store, Some(&repo)).unwrap();
+    let mut setup = HttpSetup::load(&args(&["--region", "ru"]), &store, Some(&repo), None).unwrap();
     assert!(setup.config.credentials.is_none());
     let api = MockServer::start().await;
     mount_user_sign_in(&api, TAG, json!([])).await;

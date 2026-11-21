@@ -33,7 +33,7 @@ use rmcp::model::{JsonObject, Tool, ToolAnnotations};
 use serde_json::{Map, Value, json};
 
 use crate::error::ToolError;
-use crate::registry::{ToolKind, ToolRegistry, access_flag};
+use crate::registry::{ToolKind, ToolRegistry, access_action};
 
 /// Значение `--toolsets`, которое включает все наборы.
 pub const ALL_TOOLSETS: &str = "all";
@@ -271,13 +271,14 @@ pub fn list(args: &JsonObject, registry: &ToolRegistry) -> Result<String, ToolEr
     out.insert("toolsets".into(), Value::Array(toolsets));
     let mut note = format!("Enable a toolset with `{ENABLE_TOOLSET_TOOL}` to load its tools.");
     if hidden_total > 0 {
-        let flag = match registry.max_access() {
-            AccessLevel::Read => access_flag(AccessLevel::Write),
-            _ => access_flag(AccessLevel::Destructive),
+        let next = match registry.max_access() {
+            AccessLevel::Read => AccessLevel::Write,
+            _ => AccessLevel::Destructive,
         };
         note.push_str(&format!(
             " `above_access_level` counts tools this server does not allow at its access \
-             level; only the user can allow them by restarting the server (e.g. with {flag})."
+             level; only the user can allow them (for example, {}).",
+            access_action(next, registry.http())
         ));
     }
     out.insert("note".into(), json!(note));
@@ -477,7 +478,7 @@ mod tests {
         assert!(reviews["above_access_level"].as_u64().unwrap() >= 1);
         let apps = toolsets.iter().find(|t| t["toolset"] == "apps").unwrap();
         assert_eq!(apps["enabled"], false);
-        assert!(out["note"].as_str().unwrap().contains("--allow-write"));
+        assert!(out["note"].as_str().unwrap().contains("write access"));
 
         let err = list(&args(json!({"x": 1})), &reg).unwrap_err();
         assert!(err.message().contains("no arguments"));
@@ -494,7 +495,7 @@ mod tests {
         assert!(
             next.unavailable_reason("reply_review")
                 .unwrap()
-                .contains("--allow-destructive")
+                .contains("destructive access")
         );
         let out = parse(&toggled.text);
         assert_eq!(out["enabled"], json!(["reviews"]));
@@ -547,7 +548,7 @@ mod tests {
         assert!(reason.contains("`enable_toolset`"), "{reason}");
         assert!(reason.contains("toolset: \"reviews\""), "{reason}");
         let reason = reg.unavailable_reason("update_app_info").unwrap();
-        assert!(reason.contains("--allow-write"), "{reason}");
+        assert!(reason.contains("write access"), "{reason}");
     }
 
     #[test]

@@ -551,7 +551,7 @@ mod tests {
             json!({"method": "DELETE", "path": "/api/publish/v2/something-new"}),
             AccessLevel::Write,
         );
-        assert!(message.contains("--allow-destructive"), "{message}");
+        assert!(message.contains("destructive access"), "{message}");
         assert!(message.contains("unknown path"), "{message}");
     }
 
@@ -585,13 +585,13 @@ mod tests {
     fn access_comes_from_the_operation_table() {
         let submit = "/api/publish/v2/app-submit";
         let message = error(json!({"method": "POST", "path": submit}), AccessLevel::Read);
-        assert!(message.contains("--allow-destructive"), "{message}");
+        assert!(message.contains("destructive access"), "{message}");
         assert!(message.contains("`submit_app`"), "{message}");
         let message = error(
             json!({"method": "POST", "path": submit}),
             AccessLevel::Write,
         );
-        assert!(message.contains("--allow-destructive"), "{message}");
+        assert!(message.contains("destructive access"), "{message}");
         assert!(
             prepare_with(
                 json!({"method": "POST", "path": submit}),
@@ -605,7 +605,7 @@ mod tests {
             json!({"method": "PUT", "path": "/api/publish/v2/app-language-info", "body": {}}),
             AccessLevel::Read,
         );
-        assert!(message.contains("--allow-write"), "{message}");
+        assert!(message.contains("write access"), "{message}");
         let prepared = prepare_with(
             json!({"method": "PUT", "path": "/api/publish/v2/app-language-info", "body": {}}),
             AccessLevel::Write,
@@ -619,7 +619,7 @@ mod tests {
             ("PUT", "/api/publish/v2/PHASED-RELEASE"),
         ] {
             let message = error(json!({"method": method, "path": path}), AccessLevel::Write);
-            assert!(message.contains("--allow-destructive"), "{path}: {message}");
+            assert!(message.contains("destructive access"), "{path}: {message}");
         }
     }
 

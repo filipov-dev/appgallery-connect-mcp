@@ -141,7 +141,7 @@ async fn search_works_without_the_api() {
         body["status"]
             .as_str()
             .unwrap()
-            .contains("--allow-destructive")
+            .contains("destructive access")
     );
     assert!(body["input_schema"]["properties"].is_object());
 
@@ -309,11 +309,11 @@ async fn request_rejections_send_nothing() {
     let cases = [
         (
             json!({"method": "POST", "path": "/api/publish/v2/app-submit", "query": {"appId": "1"}}),
-            "--allow-destructive",
+            "destructive access",
         ),
         (
             json!({"method": "DELETE", "path": "/api/publish/v2/app-language-info"}),
-            "--allow-destructive",
+            "destructive access",
         ),
         (
             json!({"path": format!("{}/api/publish/v2/app-info", api.uri())}),

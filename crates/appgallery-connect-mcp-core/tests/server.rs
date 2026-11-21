@@ -221,12 +221,12 @@ async fn unregistered_tools_explain_the_flag_and_unknown_tools_fail() {
     )
     .await;
     assert_eq!(result.is_error, Some(true));
-    assert!(text(&result).contains("--allow-write"), "{}", text(&result));
+    assert!(text(&result).contains("write access"), "{}", text(&result));
 
     let result = call(&client, "submit_app", json!({"appId": "1"})).await;
     assert_eq!(result.is_error, Some(true));
     assert!(
-        text(&result).contains("--allow-destructive"),
+        text(&result).contains("destructive access"),
         "{}",
         text(&result)
     );

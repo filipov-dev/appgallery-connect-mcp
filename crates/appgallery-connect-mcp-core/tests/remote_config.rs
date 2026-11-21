@@ -270,7 +270,7 @@ async fn toolset_is_off_by_default_and_tools_follow_access_levels() {
     // Недоступный на уровне чтения инструмент объясняет, какой флаг нужен.
     let f = fixture_with(AccessLevel::Read, set, true, false).await;
     let text = failure(&f.call("update_remote_config", json!({})).await);
-    assert!(text.contains("--allow-destructive"), "{text}");
+    assert!(text.contains("destructive access"), "{text}");
 }
 
 #[tokio::test]

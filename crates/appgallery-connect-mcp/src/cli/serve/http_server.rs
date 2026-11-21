@@ -27,9 +27,16 @@
 //! запросы идут от имени пользователя в команде профиля. `--secret-file` всегда задаёт
 //! API-клиент.
 //!
+//! Права сервера (потолок для токенов) с учётными данными из хранилища — те же, что у stdio:
+//! права профиля, на macOS урезанные до одобренных, суженные флагами (флаг сверх профиля —
+//! ошибка запуска). Иначе агент, которому права профиля не дают записи, поднял бы себе
+//! HTTP-сервер с `--allow-write`. С `--secret-file` (контейнер, профиля может не быть) права
+//! задают одни флаги, как раньше: секрет в файле у оператора и так есть.
+//!
 //! Локальных файлов клиента у HTTP-сервера нет: файловые аргументы — только каталоги
-//! сервера из `--allow-path` (`ServerOptions::http`), без них инструменты, которым файл
-//! обязателен, не регистрируются.
+//! сервера (`allow_path` профиля после сужения `--allow-path`, с `--secret-file` — из
+//! `--allow-path`; `ServerOptions::http`), без них инструменты, которым файл обязателен, не
+//! регистрируются.
 
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -51,9 +58,12 @@ use rmcp::transport::streamable_http_server::session::local::LocalSessionManager
 use rmcp::transport::streamable_http_server::{StreamableHttpServerConfig, StreamableHttpService};
 use tokio_util::sync::CancellationToken;
 
+use mcp_kit::approval::ApprovalStore;
+
 use super::access_tokens::{AccessTokens, MAX_TOKEN_LEN, MIN_TOKEN_LEN};
-use super::{ServeArgs, secret_file};
+use super::{ServeArgs, api_level, resolve_access, secret_file};
 use crate::cli::{jq_worker, tools};
+use crate::clients::EXE_STEM;
 use crate::profiles::{ProfileKind, ProfileRepo, load_profile_with, save_rotated_sign_in};
 
 /// Адрес по умолчанию: только локальные подключения. Порт отличается от соседних
@@ -89,15 +99,19 @@ pub struct HttpSetup {
     pub options: ServerOptions,
     /// Клиент API с учётными данными сервера; токен выпускается при первом запросе.
     pub config: ClientConfig,
+    /// Предупреждение для stderr: права профиля урезаны до одобренных (macOS).
+    pub warning: Option<String>,
 }
 
 impl HttpSetup {
     /// Собирает настройки из флагов. `repo` — каталог профилей: без него (`--secret-file` в
-    /// контейнере без каталога конфигурации) настройки профиля пустые.
+    /// контейнере без каталога конфигурации) настройки профиля пустые. `approvals` —
+    /// одобренные права (macOS) для учётных данных из хранилища.
     pub fn load(
         args: &ServeArgs,
         store: &dyn CredentialStore,
         repo: Option<&ProfileRepo>,
+        approvals: Option<&dyn ApprovalStore>,
     ) -> anyhow::Result<Self> {
         args.validate()?;
         let tokens_path = args.access_tokens.as_deref().ok_or_else(|| {
@@ -106,8 +120,6 @@ impl HttpSetup {
                  access token of MCP clients (see `appgallery-connect-mcp serve --help`)"
             )
         })?;
-        let max_access = access_from_flags(args.allow_write, args.allow_destructive);
-        let tokens = AccessTokens::load(tokens_path, max_access)?;
         let toolsets = normalize_toolsets(&args.toolsets).map_err(|err| anyhow!(err))?;
 
         let profile = args.profile();
@@ -117,6 +129,24 @@ impl HttpSetup {
         };
         let has_profile = found.is_some();
         let settings = found.unwrap_or_default();
+        // Потолок прав: с учётными данными из хранилища — права профиля, суженные флагами;
+        // с `--secret-file` — флаги. Без каталога профилей сервер не запустится и так (ниже —
+        // подсказка про `--secret-file`), права профиля там не проверяются.
+        let (max_access, allowed_paths, warning) = if args.secret_file.is_some() || repo.is_none() {
+            (
+                access_from_flags(args.allow_write, args.allow_destructive),
+                args.allow_path.clone(),
+                None,
+            )
+        } else {
+            let resolved = resolve_access(args, &settings, approvals)?;
+            (
+                api_level(resolved.access.level),
+                resolved.access.allow_path.clone(),
+                resolved.verified.warning(EXE_STEM, profile),
+            )
+        };
+        let tokens = AccessTokens::load(tokens_path, max_access)?;
         // Учётные данные сервера: файл секрета или профиль из хранилища хоста.
         let mut config = match args.secret_file.as_deref() {
             Some(path) => {
@@ -181,7 +211,7 @@ impl HttpSetup {
             // относится.
             custom_tools: tools::load(None, &args.tools_file)?,
             jq: jq_worker::current_runner(),
-            allowed_paths: args.allow_path.clone(),
+            allowed_paths,
             http: true,
             ..ServerOptions::default()
         };
@@ -201,6 +231,7 @@ impl HttpSetup {
             tokens,
             options,
             config,
+            warning,
         })
     }
 
@@ -316,7 +347,16 @@ pub async fn run_from_args(args: &ServeArgs) -> anyhow::Result<()> {
         }
         Err(err) => return Err(err),
     };
-    let mut setup = HttpSetup::load(args, &appgallery_connect_api::KeyringStore, repo.as_ref())?;
+    let approvals = mcp_kit::approval::platform_store(EXE_STEM);
+    let mut setup = HttpSetup::load(
+        args,
+        &appgallery_connect_api::KeyringStore,
+        repo.as_ref(),
+        approvals.as_deref(),
+    )?;
+    if let Some(warning) = &setup.warning {
+        eprintln!("appgallery-connect-mcp: {warning}");
+    }
     // Вход пользователя: новый refresh token — в хранилище хоста сервера (оператора).
     save_rotated_sign_in(&mut setup.config, args.profile());
     tracing::info!(

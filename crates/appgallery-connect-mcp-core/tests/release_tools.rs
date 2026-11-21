@@ -33,7 +33,7 @@ async fn destructive_release_tools_need_allow_destructive() {
         let result = call(&client, name, json!({"appId": APP, "action": "suspend"})).await;
         assert_eq!(result.is_error, Some(true), "{name}");
         let message = text(&result);
-        assert!(message.contains("--allow-destructive"), "{name}: {message}");
+        assert!(message.contains("destructive access"), "{name}: {message}");
     }
     client.cancel().await.unwrap();
 

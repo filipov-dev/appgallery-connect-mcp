@@ -363,7 +363,7 @@ async fn custom_tools_inherit_access_level_and_toolset() {
         message.contains("custom tool `rename_main_app`"),
         "{message}"
     );
-    assert!(message.contains("--allow-write"), "{message}");
+    assert!(message.contains("write access"), "{message}");
     client.cancel().await.unwrap();
 
     // На сервере записи — уровень записи и набор `listing` операции.

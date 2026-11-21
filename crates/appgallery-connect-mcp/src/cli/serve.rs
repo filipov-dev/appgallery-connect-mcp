@@ -5,8 +5,10 @@
 //! Ошибка запуска (нет учётных данных, хранилище недоступно, неизвестный набор) возвращается
 //! до начала протокола: в stdout ничего не пишется, код выхода ненулевой.
 //!
-//! Уровень доступа и наборы: флаги командной строки, если заданы, иначе настройки профиля,
-//! иначе только чтение и наборы по умолчанию. Учётные данные API-клиента — только из
+//! Права (уровень доступа и каталоги `allow_path`) — из настроек профиля; флаги командной
+//! строки их только сужают, на macOS права сверх чтения ещё и должны быть одобрены
+//! владельцем ([`mcp_kit::approval`]). Наборы: флаги, иначе профиль, иначе по умолчанию.
+//! Учётные данные API-клиента — только из
 //! системного хранилища по профилю; access token выпускается лениво, при первом запросе к
 //! API, поэтому запуск и `initialize`/`tools/list` обходятся без сети.
 //!
@@ -16,8 +18,9 @@
 //! загружаются и проверяются до начала протокола ([`crate::cli::tools`]). Фильтры `jq`
 //! выполняются в дочернем процессе этого же бинарника ([`crate::cli::jq_worker`]).
 //!
-//! `--allow-path` добавляет каталог к разрешённым для локальных файлов (`save_to`) вместе с
-//! рабочим и временным каталогом; несуществующий каталог — ошибка запуска. Секреты
+//! Каталоги `allow_path` профиля (после сужения `--allow-path`) разрешены для локальных
+//! файлов (`save_to`) вместе с рабочим и временным каталогом; несуществующий каталог —
+//! ошибка запуска. Секреты
 //! составных инструментов — в отдельном сервисе системного хранилища (`KeyringVault`).
 
 use std::net::SocketAddr;
@@ -32,14 +35,17 @@ use appgallery_connect_api::{
 };
 use appgallery_connect_mcp_core::{
     ALL_TOOLSETS, AppGalleryServer, DEFAULT_PROFILE_NAME, ServerOptions, Services, ToolRegistry,
-    access_from_flags, access_name, normalize_toolsets, server_name,
+    access_name, normalize_toolsets, server_name,
 };
 use clap::Args;
+use mcp_kit::approval::{self, ApprovalState, ApprovalStore, Resolved};
+use mcp_kit::{AccessRequest, ProfileAccess};
 use rmcp::ServiceExt;
 use rmcp::transport::stdio;
 use tracing_subscriber::EnvFilter;
 
 use crate::cli::{ProfileArg, jq_worker, tools};
+use crate::clients::EXE_STEM;
 use crate::profiles::{
     ProfileKind, ProfileRepo, ProfileSettings, describe_region, load_app_secrets,
     load_profile_with, load_projects, parse_region, save_rotated_sign_in, validate_profile_name,
@@ -59,21 +65,28 @@ const DEFAULT_LOG_LEVEL: &str = "warn";
 
 #[derive(Debug, Clone, Args)]
 #[command(after_help = "\
-Access level and toolsets: flags given on the command line win; without them the settings \
-saved for the profile are used. Without any, the server is read-only and exposes the default \
-toolsets: apps, releases, reviews. --allow-write registers tools that change data (app \
-information, store listings, package and release settings); --allow-destructive also registers \
-tools whose effect reaches users or money or cannot be undone (submitting a version for \
-review, phased releases and release time, public replies to reviews, products, prices and \
-promotions, deleting data) and implies --allow-write. \
-Use --toolsets all for every toolset. Tools above the access level or outside the enabled \
-toolsets are not registered: calling them explains which flag or toolset enables them.
+Access: the access level and the extra directories for local files (allow_path) are settings \
+of the profile; change them with `appgallery-connect-mcp ui`. Without them the server is \
+read-only. The write level registers tools that change data (app information, store listings, \
+package and release settings); the destructive level also registers tools whose effect reaches \
+users or money or cannot be undone (submitting a version for review, phased releases and \
+release time, public replies to reviews, products, prices and promotions, deleting data). \
+--allow-write, --allow-destructive and --allow-path can only narrow the access of the profile: \
+asking for more than the profile allows is an error. On macOS, access above read-only takes \
+effect only after the owner approved it on this Mac (`appgallery-connect-mcp ui` asks for \
+Touch ID or the macOS password); without the approval the server runs read-only and says so \
+in stderr. --allow-destructive implies --allow-write.
+
+Toolsets: --toolsets wins; without it the toolsets saved for the profile are used, otherwise \
+the default toolsets: apps, releases, reviews. Use --toolsets all for every toolset. Tools \
+above the access level or outside the enabled toolsets are not registered: calling them \
+explains how to enable them.
 
 Dynamic toolsets: with --dynamic-toolsets (or `dynamic_toolsets = true` in the profile) the \
 server starts with only `list_toolsets`, `enable_toolset` and `disable_toolset`, plus the \
 toolsets of --toolsets or of the profile (without them, none); the agent enables the \
 toolsets it needs, and the client is notified that the tool list changed. The access level \
-does not change: enabled toolsets get only the tools the flags allow.
+does not change: enabled toolsets get only the tools the access allows.
 
 Custom tools: the file tools.toml next to profiles.toml \
 (~/.config/appgallery-connect-mcp/tools.toml) is always read when it exists; --tools-file adds \
@@ -102,7 +115,7 @@ temporary links to reports, certificates and profiles are hidden, and those tool
 save_to: the server saves the file and returns its path and size.
 
 Local files: save_to accepts only new files inside the working directory of the server, the \
-temporary directory and the directories given with --allow-path; existing files are never \
+temporary directory and the allow_path directories of the profile; existing files are never \
 overwritten. Files are downloaded only from Huawei hosts.
 
 Logs go to stderr only (stdout carries the MCP protocol). The level comes from --log-level, \
@@ -116,22 +129,27 @@ mode 0600 or 0400) with the client secret and --client-id, or with JSON {\"clien
 \"client_secret\"}; --region sets the site (default: the region of the profile; required without a profile). \
 Clients send an access token in `Authorization: Bearer <token>`; --access-tokens names a TOML \
 file with the SHA-256 of every token and its access level and toolsets ([[tokens]] with name, \
-sha256, access = read|write|destructive, toolsets). A token's access cannot exceed \
---allow-write or --allow-destructive of the server; tokens without toolsets get --toolsets. \
-Requests without a known token get HTTP 401. File arguments work only with server directories \
-given with --allow-path (relative paths start in the first one); without it tools that need a \
-file are not registered. Custom tools come only from --tools-file. Requests must use a \
+sha256, access = read|write|destructive, toolsets). The access of the server is the access of \
+the profile (approved on this Mac on macOS), narrowed by --allow-write, --allow-destructive and \
+--allow-path, as without --http; with --secret-file it is set by those flags alone (read-only \
+without them). A token's access cannot exceed the access of the server; tokens without \
+toolsets get --toolsets. Requests without a known token get HTTP 401. File arguments work only \
+with the directories of the server (allow_path of the profile, or --allow-path with \
+--secret-file; relative paths start in the first one); without them tools that need a file are \
+not registered. Custom tools come only from --tools-file. Requests must use a \
 loopback Host, the --listen address or an --allowed-host; browser requests are rejected unless \
 their Origin is allowed with --allowed-origin. Outside loopback, put the server behind a TLS \
 reverse proxy.")]
 pub struct ServeArgs {
     #[command(flatten)]
     pub profile: ProfileArg,
-    /// Register tools that create or change data.
+    /// Limit the access to write (the profile must allow it): tools that create or change
+    /// data. With --secret-file: the access of the HTTP server.
     #[arg(long)]
     pub allow_write: bool,
-    /// Register tools whose effect reaches users or money or cannot be undone: submitting for
-    /// review, releases, replies to reviews, prices, deleting data (implies --allow-write).
+    /// Limit the access to destructive (the profile must allow it; implies --allow-write):
+    /// also tools whose effect reaches users or money or cannot be undone. With
+    /// --secret-file: the access of the HTTP server.
     #[arg(long)]
     pub allow_destructive: bool,
     /// Comma-separated toolsets to enable, or `all` [default: apps,releases,reviews].
@@ -147,9 +165,10 @@ pub struct ServeArgs {
     /// ~/.config/appgallery-connect-mcp/tools.toml). Repeatable.
     #[arg(long, value_name = "PATH")]
     pub tools_file: Vec<PathBuf>,
-    /// Extra directory that tools may read files from or save files to (`save_to`), besides
-    /// the working directory and the temporary directory (with --http: instead of them).
-    /// Repeatable; must exist.
+    /// Limit the extra directories of the profile to this one (it must be inside a directory
+    /// of the profile). Tools may read files from or save files to (`save_to`) these
+    /// directories besides the working directory and the temporary directory (with --http:
+    /// instead of them). Repeatable; must exist.
     #[arg(long, value_name = "DIR")]
     pub allow_path: Vec<PathBuf>,
     /// Timeout of one API request, in seconds.
@@ -204,8 +223,46 @@ pub struct ServeArgs {
 }
 
 impl ServeArgs {
-    fn profile(&self) -> &str {
+    /// Аргументы `serve` без флагов для профиля `profile`: так сервер собирают `call` и `ui`.
+    pub fn for_profile(profile: &str) -> Self {
+        Self {
+            profile: ProfileArg {
+                profile: profile.to_owned(),
+            },
+            allow_write: false,
+            allow_destructive: false,
+            toolsets: Vec::new(),
+            dynamic_toolsets: false,
+            tools_file: Vec::new(),
+            allow_path: Vec::new(),
+            timeout: DEFAULT_TIMEOUT_SECS,
+            max_response_bytes: DEFAULT_MAX_RESPONSE_BYTES,
+            log_level: None,
+            status: false,
+            http: false,
+            listen: None,
+            access_tokens: None,
+            secret_file: None,
+            client_id: None,
+            region: None,
+            allowed_host: Vec::new(),
+            allowed_origin: Vec::new(),
+            max_request_bytes: None,
+        }
+    }
+
+    pub(crate) fn profile(&self) -> &str {
         &self.profile.profile
+    }
+
+    /// Что просят флаги доступа. Относительный `--allow-path` считается от рабочего каталога.
+    pub(crate) fn access_request(&self) -> AccessRequest {
+        let paths = self
+            .allow_path
+            .iter()
+            .map(|path| std::path::absolute(path).unwrap_or_else(|_| path.clone()))
+            .collect();
+        AccessRequest::from_flags(self.allow_write, self.allow_destructive, paths)
     }
 
     /// Проверка аргументов до обращения к профилю и хранилищу.
@@ -232,10 +289,20 @@ pub async fn run(args: ServeArgs) -> anyhow::Result<()> {
         return http_server::run_from_args(&args).await;
     }
     let repo = ProfileRepo::open_default()?;
+    let approvals = approval::platform_store(EXE_STEM);
     if args.status {
-        return status(&KeyringStore, &repo, &args, &mut TerminalUi);
+        return status(
+            &KeyringStore,
+            &repo,
+            approvals.as_deref(),
+            &args,
+            &mut TerminalUi,
+        );
     }
-    let mut setup = Setup::load(&args, &KeyringStore, &repo)?;
+    let mut setup = Setup::load(&args, &KeyringStore, &repo, approvals.as_deref())?;
+    if let Some(warning) = &setup.warning {
+        eprintln!("appgallery-connect-mcp: {warning}");
+    }
     // Новый refresh token входа пользователя (если HUAWEI ID его выдаст) — в хранилище.
     save_rotated_sign_in(&mut setup.config, args.profile());
     tracing::info!(
@@ -256,7 +323,7 @@ pub async fn run(args: ServeArgs) -> anyhow::Result<()> {
 }
 
 /// Логи — только в stderr: stdout занят протоколом MCP.
-fn init_logging(level: Option<&str>) -> anyhow::Result<()> {
+pub(crate) fn init_logging(level: Option<&str>) -> anyhow::Result<()> {
     let filter = match level {
         Some(level) => EnvFilter::try_new(level)
             .map_err(|err| anyhow!("invalid --log-level `{level}`: {err}"))?,
@@ -277,15 +344,19 @@ fn init_logging(level: Option<&str>) -> anyhow::Result<()> {
 pub struct Setup {
     pub options: ServerOptions,
     pub config: ClientConfig,
+    /// Предупреждение для stderr: права профиля урезаны до одобренных (macOS).
+    pub warning: Option<String>,
 }
 
 impl Setup {
-    /// Читает профиль (учётные данные — из `store`) и пользовательские инструменты и
-    /// собирает настройки сервера. Ошибка в `tools.toml` — ошибка запуска.
+    /// Читает профиль (учётные данные — из `store`, одобренные права — из `approvals`) и
+    /// пользовательские инструменты и собирает настройки сервера. Ошибка в `tools.toml` —
+    /// ошибка запуска.
     pub fn load(
         args: &ServeArgs,
         store: &dyn CredentialStore,
         repo: &ProfileRepo,
+        approvals: Option<&dyn ApprovalStore>,
     ) -> anyhow::Result<Self> {
         args.validate()?;
         let custom_tools = tools::load(Some(&tools::user_tools_file(repo)), &args.tools_file)?;
@@ -297,13 +368,18 @@ impl Setup {
         for problem in profile.project_problems.iter().chain(&profile.app_problems) {
             tracing::warn!("{problem}");
         }
-        let mut options = effective_options(args, &profile.settings)?;
+        let resolved = resolve_access(args, &profile.settings, approvals)?;
+        let mut options = effective_options(args, &profile.settings, &resolved.access)?;
         options.custom_tools = custom_tools;
         options.jq = jq_worker::current_runner();
         let mut config = profile.client_config();
         config.timeout = Duration::from_secs(args.timeout);
         config.max_response_bytes = args.max_response_bytes;
-        Ok(Self { options, config })
+        Ok(Self {
+            options,
+            config,
+            warning: resolved.verified.warning(EXE_STEM, profile_name),
+        })
     }
 
     pub fn server(self) -> anyhow::Result<AppGalleryServer> {
@@ -339,22 +415,48 @@ impl Source {
     }
 }
 
-/// Уровень доступа: флаги командной строки, если заданы, иначе настройки профиля.
-/// В обоих случаях `allow_destructive` подразумевает запись.
-fn effective_access(args: &ServeArgs, settings: &ProfileSettings) -> (AccessLevel, Source) {
-    if args.allow_write || args.allow_destructive {
-        (
-            access_from_flags(args.allow_write, args.allow_destructive),
-            Source::Flags,
+/// Права сервера: права профиля, урезанные до одобренных (macOS), затем суженные флагами.
+/// Флаг сверх прав профиля — ошибка с подсказкой, где меняются права.
+pub(crate) fn resolve_access(
+    args: &ServeArgs,
+    settings: &ProfileSettings,
+    approvals: Option<&dyn ApprovalStore>,
+) -> anyhow::Result<Resolved> {
+    let profile = args.profile();
+    approval::resolve_with(
+        approvals,
+        profile,
+        &settings.access(),
+        &args.access_request(),
+    )
+    .map_err(|err| {
+        anyhow!(
+            "{err}. The access of a profile is changed with `appgallery-connect-mcp ui` \
+             (profile `{profile}`) or `appgallery-connect-mcp connect --allow-write ...`; \
+             registrations made by older versions with access flags are updated by \
+             `appgallery-connect-mcp connect`"
         )
+    })
+}
+
+/// Уровень доступа ядра по уровню из mcp-kit.
+pub fn api_level(level: mcp_kit::AccessLevel) -> AccessLevel {
+    match level {
+        mcp_kit::AccessLevel::Read => AccessLevel::Read,
+        mcp_kit::AccessLevel::Write => AccessLevel::Write,
+        mcp_kit::AccessLevel::Destructive => AccessLevel::Destructive,
+    }
+}
+
+/// Откуда взяты права: из флагов (сужены), из профиля или по умолчанию (только чтение).
+fn access_source(args: &ServeArgs, settings: &ProfileSettings) -> Source {
+    let request = args.access_request();
+    if request.level.is_some() || !request.allow_path.is_empty() {
+        Source::Flags
+    } else if settings.access().is_read_only() {
+        Source::Default
     } else {
-        let level = access_from_flags(settings.allow_write, settings.allow_destructive);
-        let source = if level == AccessLevel::Read {
-            Source::Default
-        } else {
-            Source::Profile
-        };
-        (level, source)
+        Source::Profile
     }
 }
 
@@ -379,14 +481,14 @@ fn effective_toolsets(
 fn effective_options(
     args: &ServeArgs,
     settings: &ProfileSettings,
+    access: &ProfileAccess,
 ) -> anyhow::Result<ServerOptions> {
-    let (max_access, _) = effective_access(args, settings);
     let (toolsets, _) = effective_toolsets(args, settings)?;
     Ok(ServerOptions {
-        max_access,
+        max_access: api_level(access.level),
         toolsets,
         dynamic_toolsets: args.dynamic_toolsets || settings.dynamic_toolsets,
-        allowed_paths: args.allow_path.clone(),
+        allowed_paths: access.allow_path.clone(),
         profile: Some(args.profile().to_owned()),
         apps: settings.apps.clone(),
         packages: settings.packages.clone(),
@@ -399,6 +501,7 @@ fn effective_options(
 pub fn status(
     store: &dyn CredentialStore,
     repo: &ProfileRepo,
+    approvals: Option<&dyn ApprovalStore>,
     args: &ServeArgs,
     ui: &mut dyn Ui,
 ) -> anyhow::Result<()> {
@@ -409,12 +512,14 @@ pub fn status(
         ProfileKind::ApiClient => store.contains(profile)?,
         ProfileKind::Oauth => store.contains_oauth(profile)?,
     };
-    let (access, access_source) = effective_access(args, &settings);
+    let resolved = resolve_access(args, &settings, approvals)?;
+    let access = api_level(resolved.access.level);
+    let access_source = access_source(args, &settings);
     let (_, toolsets_source) = effective_toolsets(args, &settings)?;
     let tools_file = tools::user_tools_file(repo);
     let options = ServerOptions {
         custom_tools: tools::load(Some(&tools_file), &args.tools_file)?,
-        ..effective_options(args, &settings)?
+        ..effective_options(args, &settings, &resolved.access)?
     };
     let registry = ToolRegistry::new(&options).map_err(|err| anyhow!(err))?;
 
@@ -492,6 +597,13 @@ pub fn status(
         access_description(access),
         access_source.label()
     ));
+    ui.say(&format!(
+        "Approval:    {}",
+        approval_text(&resolved.verified.state)
+    ));
+    if let Some(warning) = resolved.verified.warning(EXE_STEM, profile) {
+        ui.say(&format!("Warning:     {warning}"));
+    }
     let enabled = registry.enabled_toolsets();
     let toolsets_text = if enabled.len() == appgallery_connect_api::spec::toolsets().len() {
         ALL_TOOLSETS.to_owned()
@@ -533,8 +645,9 @@ pub fn status(
         "Packages:    {}",
         list_or_none(&settings.packages)
     ));
-    if !args.allow_path.is_empty() {
-        let paths: Vec<String> = args
+    if !resolved.access.allow_path.is_empty() {
+        let paths: Vec<String> = resolved
+            .access
             .allow_path
             .iter()
             .map(|p| p.display().to_string())
@@ -564,6 +677,22 @@ fn list_or_none(values: &[String]) -> String {
         "none".to_owned()
     } else {
         values.join(", ")
+    }
+}
+
+/// Состояние одобрения для `serve --status` и `auth status`.
+pub fn approval_text(state: &ApprovalState) -> String {
+    match state {
+        ApprovalState::NotRequired => {
+            "not used on this platform (the roles of the API client limit the access)".to_owned()
+        }
+        ApprovalState::ReadOnly => "not needed (read-only)".to_owned(),
+        ApprovalState::Approved => "approved on this Mac".to_owned(),
+        ApprovalState::Missing => "not approved on this Mac".to_owned(),
+        ApprovalState::Exceeds { approved } => {
+            format!("only `{}` is approved on this Mac", approved.summary())
+        }
+        ApprovalState::Unavailable(reason) => format!("cannot read the keychain: {reason}"),
     }
 }
 
@@ -617,7 +746,13 @@ mod tests {
     }
 
     fn options(args: &[&str], saved: &ProfileSettings) -> ServerOptions {
-        effective_options(&parse(args), saved).unwrap()
+        try_options(args, saved).unwrap()
+    }
+
+    fn try_options(args: &[&str], saved: &ProfileSettings) -> anyhow::Result<ServerOptions> {
+        let args = parse(args);
+        let resolved = resolve_access(&args, saved, None)?;
+        effective_options(&args, saved, &resolved.access)
     }
 
     /// Временный каталог профилей и хранилище в памяти: настоящий keychain не трогаем.
@@ -639,7 +774,7 @@ mod tests {
 
     fn status_text(args: &[&str], repo: &ProfileRepo, store: &MemoryStore) -> String {
         let mut ui = ScriptedUi::default();
-        status(store, repo, &parse(args), &mut ui).unwrap();
+        status(store, repo, None, &parse(args), &mut ui).unwrap();
         ui.text()
     }
 
@@ -661,7 +796,7 @@ mod tests {
     }
 
     #[test]
-    fn cli_flags_win_over_profile() {
+    fn flags_narrow_access_and_win_for_toolsets() {
         let saved = settings(true, false, &["listing"]);
         let from_profile = options(&[], &saved);
         assert_eq!(from_profile.max_access, AccessLevel::Write);
@@ -670,16 +805,13 @@ mod tests {
         assert_eq!(from_profile.packages, ["com.example.app"]);
         assert_eq!(from_profile.profile.as_deref(), Some("default"));
 
-        let flags = options(
-            &["--allow-destructive", "--toolsets", "apps, reviews"],
-            &saved,
-        );
-        assert_eq!(flags.max_access, AccessLevel::Destructive);
+        let flags = options(&["--allow-write", "--toolsets", "apps, reviews"], &saved);
+        assert_eq!(flags.max_access, AccessLevel::Write);
         assert_eq!(
             flags.toolsets,
             Some(vec!["apps".to_owned(), "reviews".to_owned()])
         );
-        // `--allow-write` при `allow_destructive` в профиле — флаг побеждает.
+        // `--allow-write` при `allow_destructive` в профиле сужает права.
         let saved = settings(false, true, &[]);
         assert_eq!(
             options(&["--allow-write"], &saved).max_access,
@@ -692,31 +824,126 @@ mod tests {
             all.toolsets.unwrap().len(),
             appgallery_connect_api::spec::toolsets().len()
         );
-        let err = effective_options(&parse(&["--toolsets", "nope"]), &saved).unwrap_err();
+        let err = try_options(&["--toolsets", "nope"], &saved).unwrap_err();
         assert!(err.to_string().contains("unknown toolset `nope`"), "{err}");
         let broken = settings(false, false, &["nope"]);
-        let err = effective_options(&parse(&[]), &broken).unwrap_err();
+        let err = try_options(&[], &broken).unwrap_err();
         assert!(err.to_string().contains("profile settings"), "{err}");
+
+        // Флаги не расширяют права профиля.
+        let read_only = settings(false, false, &[]);
+        let err = try_options(&["--allow-write"], &read_only).unwrap_err();
+        let text = err.to_string();
+        assert!(text.contains("profile allows only `read`"), "{text}");
+        assert!(
+            text.contains("`appgallery-connect-mcp ui` (profile `"),
+            "{text}"
+        );
+        let write = settings(true, false, &[]);
+        assert!(try_options(&["--allow-destructive"], &write).is_err());
+    }
+
+    #[test]
+    fn allow_path_comes_from_profile_and_flags_narrow_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().canonicalize().unwrap();
+        let inner = root.join("inner");
+        std::fs::create_dir(&inner).unwrap();
+        let saved = ProfileSettings {
+            allow_path: vec![root.clone()],
+            ..settings(false, false, &[])
+        };
+        assert_eq!(
+            options(&[], &saved).allowed_paths,
+            std::slice::from_ref(&root)
+        );
+        let inner_arg = inner.display().to_string();
+        assert_eq!(
+            options(&["--allow-path", &inner_arg], &saved).allowed_paths,
+            [inner]
+        );
+        let other = tempfile::tempdir().unwrap();
+        let other_arg = other.path().display().to_string();
+        let err = try_options(&["--allow-path", &other_arg], &saved).unwrap_err();
+        assert!(
+            err.to_string().contains("not inside a directory allowed"),
+            "{err}"
+        );
+        // Без каталогов в профиле любой `--allow-path` — расширение прав.
+        let bare = settings(false, false, &[]);
+        assert!(try_options(&["--allow-path", &inner_arg], &bare).is_err());
+    }
+
+    #[test]
+    fn unapproved_access_runs_read_only_with_a_warning() {
+        use mcp_kit::approval::testing::MemoryStore as MemoryApprovals;
+
+        let (_dir, repo, store) = fixture(Some(settings(true, true, &[])), true);
+        let approvals = MemoryApprovals::default();
+        let load =
+            |args: &[&str]| Setup::load(&parse(args), &store, &repo, Some(&approvals)).unwrap();
+        let setup = load(&["--profile", "ci"]);
+        assert_eq!(setup.options.max_access, AccessLevel::Read);
+        let warning = setup.warning.unwrap();
+        assert!(warning.contains("not approved on this Mac"), "{warning}");
+        assert!(warning.contains("appgallery-connect-mcp ui"), "{warning}");
+        // Старая регистрация с флагами в пределах профиля запускается, но на чтение.
+        let setup = load(&["--profile", "ci", "--allow-destructive"]);
+        assert_eq!(setup.options.max_access, AccessLevel::Read);
+
+        approvals
+            .save(
+                "ci",
+                &ProfileAccess::new(mcp_kit::AccessLevel::Write, vec![]),
+            )
+            .unwrap();
+        let setup = load(&["--profile", "ci"]);
+        assert_eq!(setup.options.max_access, AccessLevel::Write);
+        assert!(setup.warning.unwrap().contains("only `write` is approved"));
+
+        let mut ui = ScriptedUi::default();
+        status(
+            &store,
+            &repo,
+            Some(&approvals),
+            &parse(&["--profile", "ci"]),
+            &mut ui,
+        )
+        .unwrap();
+        let text = ui.text();
+        assert!(text.contains("Access:      write"), "{text}");
+        assert!(
+            text.contains("Approval:    only `write` is approved on this Mac"),
+            "{text}"
+        );
+        assert!(text.contains("Warning:     profile `ci`"), "{text}");
     }
 
     #[test]
     fn dynamic_toolsets_from_flag_or_profile() {
+        let files = tempfile::tempdir().unwrap();
+        let root = files.path().canonicalize().unwrap();
+        let (builds, reports) = (root.join("builds"), root.join("reports"));
+        std::fs::create_dir(&builds).unwrap();
+        std::fs::create_dir(&reports).unwrap();
+        let (builds_arg, reports_arg) =
+            (builds.display().to_string(), reports.display().to_string());
         let args = [
             "--profile",
             "ci",
             "--dynamic-toolsets",
             "--allow-path",
-            "builds",
+            builds_arg.as_str(),
             "--allow-path",
-            "reports",
+            reports_arg.as_str(),
         ];
-        let saved = settings(false, false, &[]);
+        let saved = ProfileSettings {
+            allow_path: vec![root.clone()],
+            ..settings(false, false, &[])
+        };
         let with = options(&args, &saved);
         assert!(with.dynamic_toolsets);
-        assert_eq!(
-            with.allowed_paths,
-            [PathBuf::from("builds"), PathBuf::from("reports")]
-        );
+        assert_eq!(with.allowed_paths, [builds.clone(), reports.clone()]);
         assert_eq!(with.toolsets, None);
         let from_profile = options(
             &[],
@@ -769,7 +996,11 @@ mod tests {
         assert!(text.contains("Toolsets:    none (default)"), "{text}");
         assert!(text.contains("Tools:       5"), "{text}");
         assert!(
-            text.contains("Files:       working directory, temporary directory, builds, reports"),
+            text.contains(&format!(
+                "Files:       working directory, temporary directory, {}, {}",
+                builds.display(),
+                reports.display()
+            )),
             "{text}"
         );
     }
@@ -785,7 +1016,7 @@ mod tests {
             text.contains("Custom:      2 defined, 1 registered (user file: "),
             "{text}"
         );
-        let setup = Setup::load(&parse(&["--profile", "ci"]), &store, &repo).unwrap();
+        let setup = Setup::load(&parse(&["--profile", "ci"]), &store, &repo, None).unwrap();
         assert_eq!(setup.options.custom_tools.len(), 2);
 
         // Ошибка в файле — ошибка запуска с именем файла.
@@ -797,14 +1028,14 @@ mod tests {
         .unwrap();
         let broken_arg = broken.display().to_string();
         let args = parse(&["--profile", "ci", "--tools-file", &broken_arg]);
-        let err = Setup::load(&args, &store, &repo).err().unwrap();
+        let err = Setup::load(&args, &store, &repo, None).err().unwrap();
         let text = format!("{err:#}");
         assert!(
             text.contains("broken.toml: tool `x`: unknown operation"),
             "{text}"
         );
         let mut ui = ScriptedUi::default();
-        assert!(status(&store, &repo, &args, &mut ui).is_err());
+        assert!(status(&store, &repo, None, &args, &mut ui).is_err());
     }
 
     #[test]
@@ -817,6 +1048,11 @@ mod tests {
         assert!(text.contains("Region:      "), "{text}");
         assert!(text.contains("Access:      destructive"), "{text}");
         assert!(text.contains("from profile settings"), "{text}");
+        assert!(
+            text.contains("Approval:    not used on this platform"),
+            "{text}"
+        );
+        assert!(!text.contains("Warning:"), "{text}");
         assert!(text.contains("Dynamic:     off"), "{text}");
         assert!(text.contains("Custom:      0 defined"), "{text}");
         assert!(text.contains("not found)"), "{text}");
@@ -854,7 +1090,7 @@ mod tests {
         assert!(!text.contains(&client_id("project")), "{text}");
 
         // Клиент проекта без записи не мешает запуску; найденный — в настройках клиента API.
-        let setup = Setup::load(&parse(&["--profile", "ci"]), &store, &repo).unwrap();
+        let setup = Setup::load(&parse(&["--profile", "ci"]), &store, &repo, None).unwrap();
         assert_eq!(setup.config.projects.len(), 1);
         assert_eq!(setup.config.projects[0].project_id(), "100");
         assert_eq!(setup.config.profile.as_deref(), Some("ci"));
@@ -863,7 +1099,7 @@ mod tests {
     #[test]
     fn setup_requires_credentials() {
         let (_dir, repo, store) = fixture(Some(settings(false, false, &[])), false);
-        let err = Setup::load(&parse(&["--profile", "ci"]), &store, &repo)
+        let err = Setup::load(&parse(&["--profile", "ci"]), &store, &repo, None)
             .err()
             .unwrap();
         let text = format!("{err:#}");
@@ -882,6 +1118,7 @@ mod tests {
             ]),
             &store,
             &repo,
+            None,
         )
         .unwrap();
         assert_eq!(setup.config.timeout, Duration::from_secs(5));
@@ -921,7 +1158,7 @@ mod tests {
             .await;
 
         let (_dir, repo, store) = fixture(Some(settings(false, false, &[])), true);
-        let mut setup = Setup::load(&parse(&["--profile", "ci"]), &store, &repo).unwrap();
+        let mut setup = Setup::load(&parse(&["--profile", "ci"]), &store, &repo, None).unwrap();
         // Запуск не обращается к сети: токен ещё не запрошен.
         assert_eq!(api.received_requests().await.unwrap().len(), 0);
         setup.config.base_url = Some(api.uri());
@@ -1008,7 +1245,7 @@ mod tests {
         assert!(text.contains("account `ci/oauth`"), "{text}");
         assert!(!text.contains(&refresh_token("serve")), "{text}");
 
-        let mut setup = Setup::load(&parse(&["--profile", "ci"]), &store, &repo).unwrap();
+        let mut setup = Setup::load(&parse(&["--profile", "ci"]), &store, &repo, None).unwrap();
         assert!(setup.config.credentials.is_none());
         let session = setup.config.oauth.as_mut().unwrap();
         assert_eq!(session.team_id.as_deref(), Some("5100"));
@@ -1119,7 +1356,7 @@ mod tests {
         let user_file = tools::user_tools_file(&repo);
         std::fs::create_dir_all(user_file.parent().unwrap()).unwrap();
         std::fs::write(&user_file, tools::tests::SAMPLE).unwrap();
-        let mut setup = Setup::load(&parse(&["--profile", "ci"]), &store, &repo).unwrap();
+        let mut setup = Setup::load(&parse(&["--profile", "ci"]), &store, &repo, None).unwrap();
         assert!(setup.options.dynamic_toolsets);
         setup.config.base_url = Some(api.uri());
         // Бинарника с `jq-worker` у модульного теста нет: фильтр — в потоке. Отдельный

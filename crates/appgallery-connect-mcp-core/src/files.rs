@@ -131,7 +131,7 @@ pub const LOCAL_FILES_DISABLED: &str =
 impl FilePolicy {
     /// Политика с корнями по умолчанию (рабочий каталог и временный каталог) и `extra`.
     ///
-    /// Каталоги из `extra` должны существовать: опечатка в `--allow-path` — ошибка запуска.
+    /// Каталоги из `extra` (каталоги профиля) должны существовать: опечатка — ошибка запуска.
     /// Недоступные корни по умолчанию пропускаются с предупреждением в лог.
     pub fn with_defaults(extra: &[PathBuf]) -> Result<Self, FilePolicyError> {
         let cwd = std::env::current_dir().ok();
@@ -365,8 +365,9 @@ impl FilePolicy {
             return Ok(());
         }
         Err(FilePolicyError(format!(
-            "`{original}` is outside the allowed directories ({}); the user can allow more with \
-             `--allow-path <dir>`",
+            "`{original}` is outside the allowed directories ({}); the user can allow more: \
+             extra directories of the server's profile (`appgallery-connect-mcp ui`), or \
+             `--allow-path <dir>` of a server over HTTP",
             self.describe_roots()
         )))
     }

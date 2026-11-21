@@ -127,17 +127,14 @@ pub fn validate_server_name(name: &str) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Флаги `serve`, которые получает клиент. Ключа и токенов среди них нет.
+/// Флаги `serve`, которые получает клиент. Ни ключа и токенов, ни флагов доступа среди них
+/// нет: права — настройка профиля, флаги `serve` их только сужают.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ServeFlags {
-    pub allow_write: bool,
-    pub allow_destructive: bool,
     /// Наборы инструментов (`--toolsets a,b`); пустой список — набор по умолчанию `serve`.
     pub toolsets: Vec<String>,
     /// Наборы загружаются по требованию агента (`--dynamic-toolsets`).
     pub dynamic_toolsets: bool,
-    /// Абсолютные пути каталогов (`--allow-path DIR`, по одному флагу на каталог).
-    pub allow_paths: Vec<String>,
 }
 
 /// Команда запуска сервера, которую получает MCP-клиент. Ключа в ней нет: `serve` берёт его
@@ -170,23 +167,13 @@ impl ServerSpec {
             "--profile".to_owned(),
             profile.to_owned(),
         ];
-        // Флаги — по действующему уровню: удаление всегда передаётся вместе с записью.
-        if flags.allow_write || flags.allow_destructive {
-            args.push("--allow-write".to_owned());
-        }
-        if flags.allow_destructive {
-            args.push("--allow-destructive".to_owned());
-        }
+        // Флагов доступа нет: права (уровень и каталоги) — настройка профиля.
         if !flags.toolsets.is_empty() {
             args.push("--toolsets".to_owned());
             args.push(flags.toolsets.join(","));
         }
         if flags.dynamic_toolsets {
             args.push("--dynamic-toolsets".to_owned());
-        }
-        for dir in &flags.allow_paths {
-            args.push("--allow-path".to_owned());
-            args.push(dir.clone());
         }
         Ok(Self {
             name: name.to_owned(),
@@ -367,49 +354,20 @@ mod tests {
         assert_eq!(spec.args, ["serve", "--profile", "x"]);
 
         let flags = ServeFlags {
-            allow_write: true,
-            allow_destructive: true,
             toolsets: vec!["apps".into(), "releases".into()],
             dynamic_toolsets: true,
-            allow_paths: vec!["/srv/builds".into(), "/srv/my art".into()],
         };
         let spec = ServerSpec::new("agc-ci", &exe, "ci", &flags).unwrap();
+        // Права профиля в регистрацию не попадают.
         assert_eq!(
             spec.args,
             [
                 "serve",
                 "--profile",
                 "ci",
-                "--allow-write",
-                "--allow-destructive",
                 "--toolsets",
                 "apps,releases",
-                "--dynamic-toolsets",
-                "--allow-path",
-                "/srv/builds",
-                "--allow-path",
-                "/srv/my art"
-            ]
-        );
-        assert!(spec.display().ends_with("--allow-path '/srv/my art'"));
-    }
-
-    #[test]
-    fn server_spec_destructive_implies_write() {
-        let exe = PathBuf::from(TEST_EXE);
-        let flags = ServeFlags {
-            allow_destructive: true,
-            ..ServeFlags::default()
-        };
-        let spec = ServerSpec::new("agc-ci", &exe, "ci", &flags).unwrap();
-        assert_eq!(
-            spec.args,
-            [
-                "serve",
-                "--profile",
-                "ci",
-                "--allow-write",
-                "--allow-destructive"
+                "--dynamic-toolsets"
             ]
         );
     }

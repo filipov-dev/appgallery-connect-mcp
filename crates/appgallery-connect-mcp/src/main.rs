@@ -2,8 +2,9 @@
 //!
 //! Подкоманды: `auth` (учётные данные API-клиентов и профили), `key exec` (учётные данные
 //! профиля временным файлом для другой команды), `connect` (регистрация сервера в
-//! MCP-клиенте), `serve` (MCP-сервер через stdio), `tools` (инструменты сервера и
-//! `tools.toml`), `toolsets` (наборы) и скрытая `jq-worker` (фильтр `jq` для `serve`).
+//! MCP-клиенте), `serve` (MCP-сервер через stdio), `call` (вызов инструмента из консоли),
+//! `ui` (TUI профилей), `tools` (инструменты сервера и `tools.toml`), `toolsets` (наборы) и
+//! скрытая `jq-worker` (фильтр `jq` для `serve`).
 //!
 //! Вывод команд — в stdout, ошибки и диагностика — в stderr.
 
@@ -42,20 +43,28 @@ enum Command {
     /// Pass the API client credentials of a profile to other tools (Gradle, fastlane).
     #[command(subcommand)]
     Key(KeyCommand),
-    /// Run the MCP server over stdio with the API client or user sign-in of a profile.
+    /// Run the MCP server over stdio with the API client or user sign-in of a profile, with
+    /// the access of the profile (read-only by default).
     Serve(ServeArgs),
+    /// Call a tool of the server from the console, with the access of the profile; without
+    /// a tool, list the tools.
+    Call(cli::call::CallCommand),
     /// Register the server in an MCP client (Claude Code or Codex) for a profile.
     ///
     /// Stores the API client of the profile in the system keychain (as `auth login`) unless
-    /// it already has working credentials, saves the access settings in the profile and adds
-    /// `appgallery-connect-mcp serve --profile <name> ...` to the client config. The client
-    /// secret never gets into the client config.
+    /// it already has working credentials, saves the settings in the profile (the access only
+    /// when access flags are given) and adds `appgallery-connect-mcp serve --profile <name>
+    /// ...` without access flags to the client config. The client secret never gets into the
+    /// client config.
     Connect(cli::connect::ConnectArgs),
     /// List the tools the server registers and check custom tools (tools.toml).
     #[command(subcommand)]
     Tools(ToolsCommand),
     /// List the toolsets and the number of tools in each by access level.
     Toolsets(ToolsetsArgs),
+    /// Interactive view of the profiles: settings, access and its approval, registrations in
+    /// MCP clients, what the API client can do, and the tools.
+    Ui(cli::tui::UiArgs),
     /// Internal: evaluate one `jq` filter for `serve` (JSON on stdin and stdout).
     #[command(name = "jq-worker", hide = true)]
     JqWorker,
@@ -72,7 +81,10 @@ async fn run(cli: Cli) -> anyhow::Result<ExitCode> {
             cli::serve::run(args).await?;
             Ok(ExitCode::SUCCESS)
         }
+        // Код завершения `call` — 1, если инструмент вернул ошибку.
+        Command::Call(args) => cli::call::run(args).await,
         Command::Connect(args) => cli::connect::run(args).await.map(|()| ExitCode::SUCCESS),
+        Command::Ui(args) => cli::tui::run(args).await.map(|()| ExitCode::SUCCESS),
         Command::Tools(command) => {
             cli::tools::run(command)?;
             Ok(ExitCode::SUCCESS)

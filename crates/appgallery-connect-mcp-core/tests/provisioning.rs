@@ -677,7 +677,7 @@ async fn deleting_needs_allow_destructive() {
         let result = f.call(name, args).await;
         assert_eq!(result.is_error, Some(true), "{name}");
         assert!(
-            text(&result).contains("--allow-destructive"),
+            text(&result).contains("destructive access"),
             "{name}: {}",
             text(&result)
         );
@@ -696,7 +696,7 @@ async fn deleting_needs_allow_destructive() {
             .await;
         assert_eq!(result.is_error, Some(true), "{path_text}");
         assert!(
-            text(&result).contains("--allow-destructive"),
+            text(&result).contains("destructive access"),
             "{path_text}: {}",
             text(&result)
         );
@@ -707,7 +707,7 @@ async fn deleting_needs_allow_destructive() {
         let result = read.call(name, json!({})).await;
         assert_eq!(result.is_error, Some(true), "{name}");
         assert!(
-            text(&result).contains("--allow-write"),
+            text(&result).contains("write access"),
             "{name}: {}",
             text(&result)
         );

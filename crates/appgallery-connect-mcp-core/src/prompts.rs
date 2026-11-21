@@ -290,7 +290,7 @@ impl Render<'_> {
         }
     }
 
-    /// Что нужно для уровня `level` («needs …»): сервер с флагом или, в HTTP-режиме, токен
+    /// Что нужно для уровня `level` («needs …»): права профиля сервера или, в HTTP-режиме, токен
     /// доступа с этим уровнем.
     fn needs(&self, level: AccessLevel) -> String {
         access_requirement(level, self.setup.http)
@@ -402,8 +402,8 @@ conversation, run it with dryRun true first when the tool has it and show the re
 repeat a change that already succeeded.";
 
 const FILES_NOTE: &str = "Local files work only inside the directories the server allows (the \
-working directory, the temporary directory and --allow-path); existing files are never \
-overwritten.";
+working directory, the temporary directory and the extra directories of the server's \
+profile); existing files are never overwritten.";
 
 const HTTP_FILES_NOTE: &str = "Files are on the remote server, not on the user's machine, and \
 work only inside the directories the server operator allows; existing files are never \
@@ -1288,7 +1288,7 @@ mod tests {
         let write = setup(AccessLevel::Write, false, &[], &[]);
         let listing = render(&LISTING_UPDATE, &write, &[("dir", "meta")]);
         assert!(listing.contains("directory meta"));
-        assert!(listing.contains("needs a server started with --allow-destructive"));
+        assert!(listing.contains("needs destructive access for the server's profile"));
         let listing = render(&LISTING_UPDATE, &destructive, &[("dir", "meta")]);
         assert!(listing.contains("only after the user's explicit confirmation"));
     }
@@ -1396,7 +1396,7 @@ mod tests {
             request("listing_update", serde_json::json!({"dir": "m"})),
         )
         .unwrap_err();
-        assert!(err.message.contains("--allow-write"), "{}", err.message);
+        assert!(err.message.contains("write access"), "{}", err.message);
         let err = get(&prompts, &read, request("nope", Value::Null)).unwrap_err();
         assert!(!err.message.contains("listing_update"), "{}", err.message);
     }

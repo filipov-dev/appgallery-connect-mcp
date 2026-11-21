@@ -43,8 +43,8 @@ is required). Lengths (title 64, short description 80, full description 8000, re
 500 characters) and language codes are checked before anything is sent. `dry_run` defaults \
 to true and returns the plan with the differences; call again with dry_run false to apply. \
 Languages that exist in AppGallery Connect but not in the directory are only listed; with \
-delete_missing_languages they are deleted, which needs a server started with \
---allow-destructive (the default language is never deleted). The changes apply to the draft \
+delete_missing_languages they are deleted, which needs a server with destructive access \
+(the default language is never deleted). The changes apply to the draft \
 version and reach users only after the app is submitted and approved (submit_app). Images and \
 videos: image_sync. Local paths are allowed only inside the server's allowed directories.";
 
@@ -78,8 +78,8 @@ fn input_schema() -> Value {
             "delete_missing_languages": {
                 "type": "boolean",
                 "description": "Delete the languages that exist in AppGallery Connect but have \
-                    no directory (except the default language). Needs a server started with \
-                    --allow-destructive. Default: false."
+                    no directory (except the default language). Needs a server with destructive \
+                    access. Default: false."
             },
             "apply_app_info": {
                 "type": "boolean",
@@ -674,11 +674,11 @@ mod tests {
             plan["changes"],
             json!([{"action": "delete_language", "language": "ru-RU"}])
         );
-        assert!(plan["notes"].to_string().contains("--allow-destructive"));
+        assert!(plan["notes"].to_string().contains("destructive access"));
         let mut run = args.clone();
         run["dry_run"] = json!(false);
         let err = apply(&write, run.clone()).await.unwrap_err();
-        assert!(err.message().contains("--allow-destructive"), "{err}");
+        assert!(err.message().contains("destructive access"), "{err}");
         assert!(writes(&server).await.is_empty());
 
         // С флагом на уровне удаления.

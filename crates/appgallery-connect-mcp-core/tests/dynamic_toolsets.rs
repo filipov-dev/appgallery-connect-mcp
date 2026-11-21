@@ -177,7 +177,7 @@ async fn enabled_toolsets_keep_the_access_level() {
     .await;
     assert_eq!(result.is_error, Some(true));
     assert!(
-        text(&result).contains("--allow-destructive"),
+        text(&result).contains("destructive access"),
         "{}",
         text(&result)
     );

@@ -951,7 +951,7 @@ pub fn server_instructions(
     } else {
         format!(
             "Enabled toolsets: {enabled_list}; tools of other toolsets (and above the access \
-             level) are not registered, and calling them explains which flag enables them."
+             level) are not registered, and calling them explains what enables them."
         )
     };
     let custom = if options.custom_tools.is_empty() {
@@ -1126,7 +1126,8 @@ pub fn files_instructions(
     format!(
         "\n- Local files: `save_to` takes a path (absolute, or relative to the server's \
          working directory) of a new file inside the allowed directories: {}. Other paths \
-         are rejected; the user can allow more with --allow-path. Existing files are never \
+         are rejected; the user can allow more directories for the server's profile with \
+         `appgallery-connect-mcp ui`. Existing files are never \
          overwritten, and the parent directory must exist. Files are downloaded only from \
          Huawei hosts. `save_to` cannot be combined with `jq`.",
         files.describe_roots()
@@ -1303,18 +1304,20 @@ fn access_text(level: AccessLevel, http: bool) -> &'static str {
             "This server is read-only: only tools that read data are available. Tools that \
              change data (app information, localized listings, package files, certificate \
              fingerprints, HarmonyOS certificates, devices and profiles) are enabled when the \
-             user starts the server with --allow-write, and tools that release to users, \
-             affect money or delete data (submitting for review, phased release and release \
-             time, public replies to reviews, products, prices and promotions, deleting) with \
-             --allow-destructive. If a task needs them, ask the user instead of looking for \
-             workarounds."
+             user allows write access for the server's profile, and tools that release to \
+             users, affect money or delete data (submitting for review, phased release and \
+             release time, public replies to reviews, products, prices and promotions, \
+             deleting) with destructive access (the user does it with \
+             `appgallery-connect-mcp ui`, then restarts the client). If a task needs them, ask \
+             the user instead of looking for workarounds."
         }
         (AccessLevel::Write, false) => {
             "This server can read and change data, but not release, delete or affect money: \
              submitting for review, phased release and release time, public replies to \
-             reviews, products, prices and promotions and deleting need the user to start the \
-             server with --allow-destructive. Changes of app information and listings before \
-             a submission stay invisible to users until the version is released."
+             reviews, products, prices and promotions and deleting need destructive access \
+             for the server's profile (`appgallery-connect-mcp ui`). Changes of app \
+             information and listings before a submission stay invisible to users until the \
+             version is released."
         }
         (AccessLevel::Destructive, _) => {
             "This server can read, change, release and delete data. Submitting a version for \
@@ -1375,7 +1378,7 @@ mod tests {
     fn instructions_depend_on_access_profile_and_region() {
         let read = instructions(&ServerOptions::default(), Region::Cn);
         assert!(read.contains("(read-only access)"), "{read}");
-        assert!(read.contains("--allow-write") && read.contains("--allow-destructive"));
+        assert!(read.contains("write access") && read.contains("destructive access"));
         assert!(
             read.contains("Enabled toolsets: apps, releases, reviews;"),
             "{read}"

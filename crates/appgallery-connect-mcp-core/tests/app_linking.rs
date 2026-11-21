@@ -200,7 +200,7 @@ async fn toolset_is_off_by_default_and_needs_write_access() {
     for name in TOOLS {
         assert!(f.server.registry().get(name).is_none(), "{name}");
         let message = failed(&f.call(name, json!({"productId": PROJECT})).await);
-        assert!(message.contains("--allow-write"), "{message}");
+        assert!(message.contains("write access"), "{message}");
     }
 
     let f = fixture(AccessLevel::Write).await;
@@ -422,7 +422,7 @@ async fn api_request_uses_the_project_client_too() {
             )
             .await,
     );
-    assert!(message.contains("--allow-write"), "{message}");
+    assert!(message.contains("write access"), "{message}");
     assert!(read.requests().await.is_empty());
 }
 

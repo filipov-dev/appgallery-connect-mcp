@@ -2,8 +2,9 @@
 //!
 //! Сценарий: учётные данные API-клиента (сохранённые рабочие используются как есть; иначе —
 //! флаги или вопросы в терминале с пошаговой подсказкой, пробное получение токена, запись в
-//! системное хранилище, как у `auth login`) → настройки доступа в `profiles.toml` → запись
-//! сервера в конфигурацию клиента после подтверждения.
+//! системное хранилище, как у `auth login`) → настройки в `profiles.toml` (права — только
+//! если заданы флаги доступа; на macOS повышение прав одобряется Touch ID или паролем) →
+//! запись сервера в конфигурацию клиента после подтверждения, без флагов доступа.
 //!
 //! Проверка доступа — только получение access token. Лёгкого GET без обязательного `appId`
 //! или имени пакета, который справочник разрешает API-клиенту, в таблице операций нет
@@ -30,12 +31,14 @@ use appgallery_connect_api::{
     ApiClientCredentials, ClientId, CredentialStore, KeyringStore, Region, StoreError,
 };
 use clap::Args;
+use mcp_kit::approval::{self, ApprovalStore, Presence};
+use mcp_kit::{AccessLevel, ProfileAccess};
 
 use super::ProfileArg;
 use crate::clients::claude::{self, CommandRunner, SystemRunner};
 use crate::clients::{
-    ClientKind, MAX_SERVER_NAME_LEN, PROFILE_SERVER_PREFIX, RegisterOptions, Registration, Scope,
-    ServeFlags, ServerSpec, codex, default_server_name,
+    ClientKind, EXE_STEM, MAX_SERVER_NAME_LEN, PROFILE_SERVER_PREFIX, RegisterOptions,
+    Registration, Scope, ServeFlags, ServerSpec, codex, default_server_name,
 };
 use crate::login::{
     Discarded, SecretSource, WHERE_TO_FIND, default_apps, default_packages, discard,
@@ -61,13 +64,18 @@ after `auth login`), they are reused: re-running connect only changes the settin
 client registration. Pass --client-id, --secret-file or --secret-stdin to replace them.
 
 The client config gets only the command `appgallery-connect-mcp serve --profile <profile> ...` \
-with the access flags; never the client ID, the key or tokens. The access settings are also \
-saved in the profile.
+without access flags; never the client ID, the key or tokens. The access (the level and the \
+extra directories for local files) is a setting of the profile: --allow-write, \
+--allow-destructive and --allow-path change it (without them the profile keeps its access, \
+read-only for a new profile), and `appgallery-connect-mcp ui` changes it later. On macOS, \
+raising the access asks for Touch ID or the macOS password; access that is not approved does \
+not take effect. Re-running connect also rewrites a registration of an older version that had \
+access flags.
 
 By default the server is registered with --dynamic-toolsets: the agent starts with the search, \
 request and toolset tools and enables the toolsets it needs, which keeps the tool list of the \
 client short. --no-dynamic-toolsets lists every enabled tool at start instead. Either way the \
-access flags limit what the enabled toolsets register.
+access of the profile limits what the enabled toolsets register.
 
 One profile is one API client of one AppGallery Connect account. The server name in the client \
 is appgallery for the default profile and agc-<profile> for others; it may not be longer than \
@@ -124,11 +132,13 @@ pub struct ConnectArgs {
     /// packages saved in the profile.
     #[arg(long = "default-package", value_name = "NAME", value_delimiter = ',')]
     pub default_packages: Vec<String>,
-    /// Allow tools that create or modify data in AppGallery Connect.
+    /// Set the access of the profile to write: tools that create or modify data in
+    /// AppGallery Connect.
     #[arg(long)]
     pub allow_write: bool,
-    /// Allow tools with irreversible or user-visible effects: deletions, submitting for
-    /// review, releases, prices and availability (implies --allow-write).
+    /// Set the access of the profile to destructive: also tools with irreversible or
+    /// user-visible effects: deletions, submitting for review, releases, prices and
+    /// availability (implies --allow-write).
     #[arg(long)]
     pub allow_destructive: bool,
     /// Comma-separated toolsets to enable (passed to `serve --toolsets`). Default: the
@@ -139,9 +149,9 @@ pub struct ConnectArgs {
     /// start instead of being loaded by the agent on demand.
     #[arg(long)]
     pub no_dynamic_toolsets: bool,
-    /// Directory the server may read files from and write files to, besides the working and
-    /// temporary directories (passed to `serve --allow-path` as an absolute path; repeat for
-    /// several directories).
+    /// Set the extra directories of the profile: the server may read files from and write
+    /// files to them, besides the working and temporary directories (saved as absolute
+    /// paths; repeat for several directories). Replaces the directories of the profile.
     #[arg(long = "allow-path", value_name = "DIR")]
     pub allow_paths: Vec<PathBuf>,
     /// Do not ask for confirmation before changing the client config.
@@ -223,7 +233,10 @@ pub async fn run(args: ConnectArgs) -> anyhow::Result<()> {
         (None, false) => SecretSource::Prompt,
     };
     let repo = ProfileRepo::open_default()?;
+    let approvals = approval::platform_store(EXE_STEM);
+    let presence = approval::platform_presence();
     let mut env = ConnectEnv {
+        approval: approvals.as_deref().zip(presence.as_deref()),
         store: &KeyringStore,
         repo: &repo,
         verifier: verifier.as_ref(),
@@ -238,6 +251,8 @@ pub async fn run(args: ConnectArgs) -> anyhow::Result<()> {
 /// Зависимости `connect`; в тестах подменяются хранилищем в памяти, временными каталогами,
 /// `wiremock` и записью вызовов `claude`.
 pub struct ConnectEnv<'a> {
+    /// Одобрение прав (macOS); `None` — платформа без одобрения.
+    pub approval: Option<(&'a dyn ApprovalStore, &'a dyn Presence)>,
     pub store: &'a dyn CredentialStore,
     pub repo: &'a ProfileRepo,
     /// Проверка учётных данных; `None` — `--no-verify`.
@@ -271,10 +286,10 @@ fn normalize_toolsets(values: &[String]) -> anyhow::Result<Vec<String>> {
     Ok(result)
 }
 
-/// Каталоги `--allow-path`: абсолютные (клиент запускает сервер из другого каталога),
-/// существующие, без повторов. Путь не канонизируется, чтобы symlink остался symlink.
-fn normalize_allow_paths(values: &[PathBuf]) -> anyhow::Result<Vec<String>> {
-    let mut result: Vec<String> = Vec::new();
+/// Каталоги `--allow-path`: абсолютные (сервер запускается из другого каталога),
+/// существующие, без повторов. Канонизирует их сохранение прав ([`approval::save_access_with`]).
+fn normalize_allow_paths(values: &[PathBuf]) -> anyhow::Result<Vec<PathBuf>> {
+    let mut result: Vec<PathBuf> = Vec::new();
     for value in values {
         let absolute = std::path::absolute(value)
             .with_context(|| format!("cannot resolve --allow-path `{}`", value.display()))?;
@@ -284,12 +299,8 @@ fn normalize_allow_paths(values: &[PathBuf]) -> anyhow::Result<Vec<String>> {
                 absolute.display()
             );
         }
-        let text = absolute
-            .to_str()
-            .with_context(|| format!("--allow-path `{}` is not valid UTF-8", absolute.display()))?
-            .to_owned();
-        if !result.contains(&text) {
-            result.push(text);
+        if !result.contains(&absolute) {
+            result.push(absolute);
         }
     }
     Ok(result)
@@ -314,14 +325,52 @@ fn server_name(args: &ConnectArgs, profile: &str) -> anyhow::Result<String> {
     Ok(name)
 }
 
-/// Уровень доступа для показа пользователю.
-fn access_level(flags: &ServeFlags) -> &'static str {
-    if flags.allow_destructive {
-        "read, write and destructive"
-    } else if flags.allow_write {
-        "read and write"
-    } else {
-        "read-only"
+/// Права профиля после `connect`: уровень из флагов (иначе прежний) и каталоги из
+/// `--allow-path` (иначе прежние). `None` — флагов доступа нет, права не меняются.
+fn requested_access(
+    level: Option<AccessLevel>,
+    allow_path: &[PathBuf],
+    current: &ProfileAccess,
+) -> Option<ProfileAccess> {
+    if level.is_none() && allow_path.is_empty() {
+        return None;
+    }
+    Some(ProfileAccess::new(
+        level.unwrap_or(current.level),
+        if allow_path.is_empty() {
+            current.allow_path.clone()
+        } else {
+            allow_path.to_vec()
+        },
+    ))
+}
+
+/// Меняет права профиля. На macOS повышение сначала одобряется владельцем; отказ не
+/// останавливает `connect`: профиль сохраняет прежние права, учётные данные и регистрация
+/// сохраняются.
+fn change_access(
+    ui: &mut dyn Ui,
+    approval: Option<(&dyn ApprovalStore, &dyn Presence)>,
+    profile: &str,
+    settings: &mut ProfileSettings,
+    access: &ProfileAccess,
+) {
+    let before = settings.access();
+    let what = format!("{EXE_STEM} profile \"{profile}\"");
+    match approval::save_access_with(approval, profile, &what, access, |access| {
+        settings.set_access(access);
+        Ok(())
+    }) {
+        Ok(saved) if saved.prompted => ui.say(&format!(
+            "Access `{}` approved on this Mac.",
+            saved.access.summary()
+        )),
+        Ok(_) => {}
+        Err(err) => ui.say(&format!(
+            "The access was not changed: {err}. The profile keeps `{}` access; change it later \
+             with `appgallery-connect-mcp ui` (profile `{profile}`).",
+            before.summary()
+        )),
     }
 }
 
@@ -350,12 +399,11 @@ pub async fn connect(
 
     // Всё, что можно проверить без вопросов, — до первого вопроса пользователю.
     let flags = ServeFlags {
-        allow_write: args.allow_write || args.allow_destructive,
-        allow_destructive: args.allow_destructive,
         toolsets: normalize_toolsets(&args.toolsets)?,
         dynamic_toolsets: !args.no_dynamic_toolsets,
-        allow_paths: normalize_allow_paths(&args.allow_paths)?,
     };
+    let requested_level = AccessLevel::requested_by_flags(args.allow_write, args.allow_destructive);
+    let allow_paths = normalize_allow_paths(&args.allow_paths)?;
     let name = server_name(args, profile)?;
     let spec = ServerSpec::new(&name, &env.exe, profile, &flags)?;
     let apps = default_apps(&args.default_apps)?;
@@ -413,10 +461,22 @@ pub async fn connect(
         if !user_sign_in {
             dry_run_credentials(env, args, profile, region, source).await?;
         }
+        let current = settings.access();
+        let access = match requested_access(requested_level, &allow_paths, &current) {
+            Some(access) => format!(
+                "would get access `{}`{}",
+                access.summary(),
+                if env.approval.is_some() && !access.is_read_only() {
+                    " (raising it asks for Touch ID or the macOS password)"
+                } else {
+                    ""
+                }
+            ),
+            None => format!("keeps access `{}`", current.summary()),
+        };
         env.ui.say(&format!(
-            "Profile `{profile}` in {} would get access {}, toolsets: {}.",
+            "Profile `{profile}` in {} {access}, toolsets: {}.",
             env.repo.path().display(),
-            access_level(&flags),
             if flags.toolsets.is_empty() {
                 "the default set".to_owned()
             } else {
@@ -432,8 +492,9 @@ pub async fn connect(
             profile_credentials(env, args, profile, region, source).await?
         };
         settings.client = Some(client.name().to_owned());
-        settings.allow_write = flags.allow_write;
-        settings.allow_destructive = flags.allow_destructive;
+        if let Some(access) = requested_access(requested_level, &allow_paths, &settings.access()) {
+            change_access(env.ui, env.approval, profile, &mut settings, &access);
+        }
         settings.toolsets = flags.toolsets.clone();
         settings.dynamic_toolsets = flags.dynamic_toolsets;
         save(env, profile, settings, new_credentials.as_ref())?;

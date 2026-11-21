@@ -1,4 +1,5 @@
-//! Взаимодействие с пользователем в интерактивных командах (`auth`, `connect`).
+//! Взаимодействие с пользователем в интерактивных командах (`auth`, `connect`, действия
+//! `ui`).
 //!
 //! Вынесено в трейт, чтобы сценарии можно было тестировать без терминала.
 
@@ -123,6 +124,39 @@ impl Ui for SilentUi {
             io::ErrorKind::Unsupported,
             "--silent: the browser is not opened",
         ))
+    }
+}
+
+/// Вывод в память без вопросов и браузера: для действий из TUI (`ui`), где терминал занят
+/// интерфейсом. Вопрос — ошибка, «да/нет» — отказ.
+#[derive(Debug, Default)]
+pub struct CaptureUi {
+    pub lines: Vec<String>,
+}
+
+impl Ui for CaptureUi {
+    fn say(&mut self, line: &str) {
+        self.lines.push(line.to_owned());
+    }
+
+    fn ask(&mut self, _prompt: &str) -> io::Result<String> {
+        Err(io::Error::other("questions are not available here"))
+    }
+
+    fn ask_secret(&mut self, _prompt: &str) -> io::Result<Zeroizing<String>> {
+        Err(io::Error::other("questions are not available here"))
+    }
+
+    fn confirm(&mut self, _question: &str, _default: bool) -> io::Result<bool> {
+        Ok(false)
+    }
+
+    fn is_interactive(&self) -> bool {
+        false
+    }
+
+    fn open_url(&mut self, _url: &str) -> io::Result<()> {
+        Ok(())
     }
 }
 

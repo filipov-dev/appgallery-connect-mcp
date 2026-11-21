@@ -14,7 +14,8 @@
 //! toolsets = ["apps", "releases"] # по умолчанию — --toolsets сервера или наборы по умолчанию
 //! ```
 //!
-//! Уровень токена не выше уровня сервера (`--allow-write`, `--allow-destructive`): токен с
+//! Уровень токена не выше уровня сервера (права профиля, суженные флагами, или флаги
+//! `--allow-write`, `--allow-destructive` с `--secret-file`): токен с
 //! более высоким уровнем — ошибка запуска, а не молчаливое понижение. Сравнение хешей — за
 //! постоянное время ([`subtle`]), перебираются все записи.
 
@@ -159,10 +160,13 @@ impl AccessTokens {
             };
             if access > max_access {
                 bail!(
-                    "token `{name}` has access `{}`, but the server is started with `{}` \
-                     access: start it with {} or lower the token's access",
+                    "token `{name}` has access `{}`, but the server runs with `{}` access: \
+                     give the server `{}` access (the access of its profile, set with \
+                     `appgallery-connect-mcp ui`, or {} with --secret-file) or lower the \
+                     token's access",
                     access_name(access),
                     access_name(max_access),
+                    access_name(access),
                     match access {
                         AccessLevel::Destructive => "--allow-destructive",
                         _ => "--allow-write",
@@ -312,7 +316,7 @@ mod tests {
             ),
             (
                 "[[tokens]]\nname = \"a\"\nsha256 = \"HASH\"\naccess = \"write\"\n",
-                "start it with --allow-write",
+                "or --allow-write with --secret-file",
             ),
             (
                 "[[tokens]]\nname = \"a\"\nsha256 = \"HASH\"\ntoolsets = [\"nope\"]\n",

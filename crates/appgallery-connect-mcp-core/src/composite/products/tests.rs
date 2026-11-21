@@ -461,7 +461,7 @@ async fn refuses_destructive_changes_on_a_write_server() {
     let plan = apply(&ctx, json!({"file": "edited.json"})).await.unwrap();
     assert_eq!(plan["changes"][0]["level"], "destructive", "{plan}");
     assert!(
-        plan["notes"].to_string().contains("--allow-destructive"),
+        plan["notes"].to_string().contains("destructive access"),
         "{plan}"
     );
     // Применение — отказ до записи, с перечнем правок.
@@ -469,7 +469,7 @@ async fn refuses_destructive_changes_on_a_write_server() {
         .await
         .unwrap_err();
     let message = err.message();
-    assert!(message.contains("--allow-destructive"), "{message}");
+    assert!(message.contains("destructive access"), "{message}");
     assert!(
         message.contains("update product coins_100 (prices)"),
         "{message}"

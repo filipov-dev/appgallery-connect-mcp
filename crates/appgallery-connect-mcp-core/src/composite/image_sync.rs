@@ -1114,9 +1114,11 @@ async fn sync(ctx: &Context, args: Value, tuning: UploadTuning) -> Result<Value,
     let dry_run = bool_arg(&args, "dry_run")?.unwrap_or(false);
     let release_type = release_type(&args)?;
     if !dry_run && !ctx.access.allows(AccessLevel::Write) {
-        return Err(ToolError::new(
-            "uploading images needs a server started with --allow-write; dry_run works without",
-        ));
+        return Err(ToolError::new(format!(
+            "uploading images needs {}; dry_run works without. {}",
+            crate::registry::access_requirement(AccessLevel::Write, ctx.http),
+            crate::registry::access_hint(AccessLevel::Write, ctx.http)
+        )));
     }
 
     // Устройство каталога — до любых запросов.

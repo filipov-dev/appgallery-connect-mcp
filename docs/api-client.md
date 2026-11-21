@@ -119,7 +119,7 @@ appgallery-connect-mcp auth project add --profile <профиль> --credential-
 1. Сохраните API-клиент проекта, в котором лежит приложение, как описано выше. Project ID — в Project settings → General information проекта; его же агент передаёт в аргументе `productId`. Если в профиле один проект с клиентом, `remote_config_set` берёт его сам.
 2. По справочнику Remote Configuration вызывают роли Administrator, App administrator, Development и Operations: у клиента проекта должна быть одна из них, если при создании клиента выбирается роль.
 3. Регион профиля должен совпадать с местом обработки данных проекта: токен и запросы Remote Configuration идут на один хост региона (`connect-api*.cloud.huawei.com`).
-4. Запустите сервер с набором `remote-config` (`--toolsets remote-config` или `enable_toolset`). Чтение — без флагов; запись и откат — только с `--allow-destructive`: новая версия конфигурации сразу действует для пользователей приложения.
+4. Запустите сервер с набором `remote-config` (`--toolsets remote-config` или `enable_toolset`). Чтение — без особых прав; запись и откат — только с уровнем удаления в правах профиля (`appgallery-connect-mcp ui`): новая версия конфигурации сразу действует для пользователей приложения.
 
 Лимит Remote Configuration — 5 запросов в секунду и 1000 в час с одного IP-адреса.
 

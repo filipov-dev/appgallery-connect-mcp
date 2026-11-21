@@ -203,7 +203,7 @@ async fn prompt_arguments_are_checked() {
         )
         .await
         .unwrap_err();
-    assert!(err.to_string().contains("--allow-write"), "{err}");
+    assert!(err.to_string().contains("write access"), "{err}");
     client.cancel().await.unwrap();
 }
 
