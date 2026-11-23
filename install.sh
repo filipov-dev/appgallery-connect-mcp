@@ -27,6 +27,10 @@ v0.3.2 appgallery-connect-mcp-v0.3.2-macos-universal.tar.gz a39eaf2b603e8f131c6f
 v0.3.2 appgallery-connect-mcp-v0.3.2-linux-x86_64.tar.gz a7b86ed182400b0dd9a4b1b75400c9e38814ac10030d7d52bd986476979aebe6 https://github.com/filipov-dev/appgallery-connect-mcp/releases/download/v0.3.2/appgallery-connect-mcp-v0.3.2-linux-x86_64.tar.gz
 v0.3.2 appgallery-connect-mcp-v0.3.2-linux-aarch64.tar.gz 9aa6107012d5e161c0b60230c00750ecb05375b1cc15ab51b3f65acc61102193 https://github.com/filipov-dev/appgallery-connect-mcp/releases/download/v0.3.2/appgallery-connect-mcp-v0.3.2-linux-aarch64.tar.gz
 v0.3.2 SHA256SUMS - https://github.com/filipov-dev/appgallery-connect-mcp/releases/download/v0.3.2/SHA256SUMS
+v0.1.0 appgallery-connect-mcp-v0.1.0-macos-universal.tar.gz 741588648b5ef5b9e3dbbee03f509f4b44dab5de064d890f3c5db38263d64d46 https://github.com/filipov-dev/appgallery-connect-mcp/releases/download/v0.1.0/appgallery-connect-mcp-v0.1.0-macos-universal.tar.gz
+v0.1.0 appgallery-connect-mcp-v0.1.0-linux-x86_64.tar.gz d2746fd347dbb7525cfcd73079ec2470802aa9ce269e2a73176dfda53098f275 https://github.com/filipov-dev/appgallery-connect-mcp/releases/download/v0.1.0/appgallery-connect-mcp-v0.1.0-linux-x86_64.tar.gz
+v0.1.0 appgallery-connect-mcp-v0.1.0-linux-aarch64.tar.gz 3bebc40360132d0268701c3e5c2884edbcf34f2939f1fa11374bb458c9b6d62a https://github.com/filipov-dev/appgallery-connect-mcp/releases/download/v0.1.0/appgallery-connect-mcp-v0.1.0-linux-aarch64.tar.gz
+v0.1.0 SHA256SUMS - https://github.com/filipov-dev/appgallery-connect-mcp/releases/download/v0.1.0/SHA256SUMS
 '
 # @@RELEASES_END@@
 
