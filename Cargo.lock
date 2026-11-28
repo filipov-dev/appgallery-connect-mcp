@@ -104,7 +104,7 @@ checksum = "330a5ed07fa54e4702c9d6c4174f74427fc0ef6e214bbd677ae50a5099946470"
 
 [[package]]
 name = "appgallery-connect-api"
-version = "0.3.2"
+version = "0.3.3"
 dependencies = [
  "base64 0.22.1",
  "futures-util",
@@ -128,7 +128,7 @@ dependencies = [
 
 [[package]]
 name = "appgallery-connect-mcp"
-version = "0.3.2"
+version = "0.3.3"
 dependencies = [
  "anyhow",
  "appgallery-connect-api",
@@ -161,7 +161,7 @@ dependencies = [
 
 [[package]]
 name = "appgallery-connect-mcp-core"
-version = "0.3.2"
+version = "0.3.3"
 dependencies = [
  "appgallery-connect-api",
  "jaq-core",
@@ -1993,8 +1993,8 @@ checksum = "47e1ffaa40ddd1f3ed91f717a33c8c0ee23fff369e3aa8772b9605cc1d22f4c3"
 
 [[package]]
 name = "mcp-kit"
-version = "0.1.0"
-source = "git+https://git.sourcecraft.dev/filipov-dev/mcp-kit.git?tag=v0.1.0#47984e0692a8e83fe5368623a16dd1c2da904ebe"
+version = "0.2.1"
+source = "git+https://git.sourcecraft.dev/filipov-dev/mcp-kit.git?tag=v0.2.1#efdc2922b27ae4ba2218a43f181012bc2c4115d8"
 dependencies = [
  "clap",
  "dirs",
@@ -2002,6 +2002,7 @@ dependencies = [
  "ratatui",
  "rmcp",
  "robius-authentication",
+ "security-framework 3.7.0",
  "serde",
  "serde_json",
  "thiserror 2.0.21",
